@@ -2,6 +2,7 @@ import type { ErrorRequestHandler } from 'express';
 import { z } from 'zod';
 import { AppError } from '../errors/app-error.js';
 import { publicErrorDetails } from '../errors/public-details.js';
+import { publicError } from '../errors/public-error.js';
 
 export function createErrorHandler(report: (error: unknown) => void): ErrorRequestHandler {
   return (error: unknown, _req, res, next) => {
@@ -16,7 +17,7 @@ export function createErrorHandler(report: (error: unknown) => void): ErrorReque
     if (error instanceof AppError) {
       if (error.statusCode >= 500) report(error);
       res.status(error.statusCode).json({ success: false, error: {
-        code: error.code, message: error.statusCode >= 500 ? 'Service temporarily unavailable' : error.message,
+        ...publicError(error.code, error.statusCode),
         details: error.statusCode >= 500 ? [] : publicErrorDetails(error.details)
       } });
       return;

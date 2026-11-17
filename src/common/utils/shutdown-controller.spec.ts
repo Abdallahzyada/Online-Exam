@@ -4,6 +4,27 @@ import { createShutdownController, registerShutdownSignals } from './shutdown-co
 
 afterEach(() => { jest.useRealTimers(); });
 describe('shutdown deadline and repeated signals', () => {
+  it('clears the deadline after successful cleanup', async () => {
+    jest.useFakeTimers();
+    const forceExit = jest.fn(), setExitCode = jest.fn();
+    createShutdownController({ shutdown: async () => {}, forceExit, report: jest.fn(), setExitCode, deadlineMs: 100 })();
+    await jest.advanceTimersByTimeAsync(200);
+    expect(forceExit).not.toHaveBeenCalled();
+    expect(setExitCode).toHaveBeenLastCalledWith(0);
+  });
+  it('retains a later failure during cleanup and after cleanup completes', async () => {
+    jest.useFakeTimers();
+    let finish: (() => void) | undefined;
+    const setExitCode = jest.fn();
+    const stop = createShutdownController({ shutdown: () => new Promise<void>(resolve => { finish = resolve; }), forceExit: jest.fn(), report: jest.fn(), setExitCode });
+    stop();
+    await jest.advanceTimersByTimeAsync(0);
+    stop(1); stop(); finish?.();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(setExitCode).toHaveBeenLastCalledWith(1);
+    stop();
+    expect(setExitCode).toHaveBeenLastCalledWith(1);
+  });
   it('keeps the force-exit deadline after cleanup rejects', async () => {
     jest.useFakeTimers();
     const forceExit = jest.fn(), report = jest.fn(), setExitCode = jest.fn();

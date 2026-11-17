@@ -8,6 +8,7 @@ describe('DashboardService', () => {
     dependencies.analytics.withCapacity = async () => { throw new Error('Analytics admission limit reached'); };
     await expect(new DashboardService(dependencies).getAnalytics(quizId)).rejects.toThrow('admission limit');
     expect(dependencies.repository.getAnalyticsAttempts).not.toHaveBeenCalled();
+    expect(dependencies.quizzes.exists).not.toHaveBeenCalled();
     expect(dependencies.analytics.execute).not.toHaveBeenCalled();
   });
   it('returns the profile and student-scoped database KPIs', async () => {

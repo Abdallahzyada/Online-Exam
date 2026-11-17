@@ -10,6 +10,12 @@ Use Node.js 22.18 or newer. Run `npm ci`, then `npm run setup:env`. This creates
 the local .env and replaces a missing or sample signing key with 32 cryptographic
 random bytes encoded as 64 hex characters. Existing custom keys are preserved.
 Startup rejects the placeholder, invalid key format, and obvious repeated keys.
+Format and diversity checks cannot prove a key was randomly generated. To replace
+an existing custom key, use `npm run setup:env -- --rotate-key`; this invalidates
+existing tokens. Production keys must come from a cryptographic generator or a
+trusted secret manager. Setup never prints the key. It writes a private temporary
+file, flushes it, and renames it over .env. Files use mode 0600 on POSIX and a
+restricted owner/SYSTEM ACL on Windows, including when preserving an existing key.
 Set your MongoDB URL. Start MongoDB, then run `npm run dev`.
 This builds and starts the server; it does not watch files. For later starts,
 run `npm run build` and `npm start`. Open `http://localhost:3000/api/v1/health`.
@@ -67,7 +73,9 @@ Protected routes require a valid token and an existing user document.
 One worker starts with the server. Requests carry requestId, taskType, and payload.
 The manager rejects work while starting or when the pending limit is reached.
 The default worker queue limit is four pending jobs, with a separate limit of
-two complete analytics requests admitted before any database payload is loaded.
+two complete analytics requests admitted before quiz lookup or payload loading.
+Quiz lookups and the entire analytics cursor each have a 5-second database
+deadline. Cursor cleanup and admission release also run on timeout.
 Each payload allows at most 100,000 question results, and pending worker jobs
 share a budget of 200,000 question results. Timeouts terminate the stuck worker and
 reject all its pending jobs. Error and unexpected exit do the same. A replacement
@@ -87,6 +95,8 @@ requests while workers and MongoDB remain available, then stop workers, close
 MongoDB and stop monitoring. Repeated signals use the same guarded shutdown.
 An unref'ed 10-second safety deadline remains armed even after cleanup fails;
 it does not keep a clean process alive.
+Successful cleanup clears the deadline. A later server error still changes the
+exit code to failure even if shutdown has already started.
 
 The API JSON limit is 100 KB. NDJSON streaming imports use a different content
 type and are not consumed by the JSON parser. The global limit is 300 requests
@@ -94,7 +104,7 @@ per IP per 15 minutes per server process. Auth should add stricter login and OTP
 limits. TRUST_PROXY is empty by default: forwarded client addresses are ignored.
 For a real reverse proxy, explicitly list only its known IPs or CIDRs, for example
 127.0.0.1/32,::1/128 for a same-machine proxy. Boolean blanket trust and implicit
-hop counts are rejected. Use a shared rate-limit store for multiple processes.
+hop counts and /0 CIDRs are rejected. Use a shared rate-limit store for multiple processes.
 CORS uses the comma-separated origin list
 in CORS_ORIGINS. Health is public and outside the API rate limit.
 

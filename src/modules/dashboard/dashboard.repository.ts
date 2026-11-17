@@ -86,12 +86,15 @@ export class MongooseDashboardRepository implements DashboardRepository {
         _id: 0, attemptId: { $toString: '$_id' }, scorePercentage: 1,
         timeSpentSeconds: 1, questionResults: { $slice: ['$questionResults', 1001] }
       } }
-    ], { batchSize: 100 });
+    ], { batchSize: 100, timeoutMS: 5000 });
     const attempts: AnalyticsAttempt[] = [];
     let questionResults = 0;
     try {
       for await (const document of cursor) {
         if (attempts.length === 10_000) throw this.options.errors.analyticsLimit();
+        if (Array.isArray(document.questionResults) && document.questionResults.length > 1000) {
+          throw this.options.errors.analyticsLimit();
+        }
         const parsed = analyticsAttemptSchema.safeParse(document);
         if (!parsed.success) throw new Error('Stored analytics data does not match the shared contract');
         questionResults += parsed.data.questionResults.length;

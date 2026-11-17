@@ -36,7 +36,7 @@ export function createMongoReaders(connection: Connection, collections: { users:
     quizzes: {
       async exists(quizId) {
         return await connection.collection(collections.quizzes).findOne(
-          { _id: new Types.ObjectId(quizId) }, { projection: { _id: 1 } }
+          { _id: new Types.ObjectId(quizId) }, { projection: { _id: 1 }, timeoutMS: 5000 }
         ) !== null;
       }
     }

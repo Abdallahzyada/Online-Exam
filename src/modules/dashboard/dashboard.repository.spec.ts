@@ -83,6 +83,21 @@ describe('dashboard MongoDB aggregation semantics', () => {
 });
 
 describe('analytics repository cursor', () => {
+  it('maps a per-attempt limit to the public size error and closes its cursor', async () => {
+    const close = jest.fn<() => Promise<void>>().mockResolvedValue();
+    const cursor = { async *[Symbol.asyncIterator]() {
+      yield { ...makeAttempt(1, 50, 10), questionResults: Array.from({ length: 1001 }, () => ({ questionId: quizId, isCorrect: true })) };
+    }, close };
+    await expect(repositoryWith({ aggregate: () => cursor }).getAnalyticsAttempts(quizId)).rejects.toThrow('Analytics dataset limit reached');
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+  it('closes timed-out database work so admission can be released', async () => {
+    const timeout = Object.assign(new Error('Database operation timed out'), { name: 'MongoOperationTimeoutError' });
+    const close = jest.fn<() => Promise<void>>().mockResolvedValue();
+    const cursor = { async *[Symbol.asyncIterator]() { throw timeout; yield {}; }, close };
+    await expect(repositoryWith({ aggregate: () => cursor }).getAnalyticsAttempts(quizId)).rejects.toBe(timeout);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
   it('stops and closes the cursor when total question results exceed the job budget', async () => {
     const close = jest.fn<() => Promise<void>>().mockResolvedValue();
     let documentsRead = 0;
@@ -106,7 +121,7 @@ describe('analytics repository cursor', () => {
     expect(close).toHaveBeenCalledTimes(1);
     expect(aggregate).toHaveBeenCalledWith(expect.arrayContaining([
       { $match: { quizId: new Types.ObjectId(quizId), status: 'SUBMITTED' } }, { $limit: 10_001 }
-    ]), { batchSize: 100 });
+    ]), { batchSize: 100, timeoutMS: 5000 });
   });
 
   it('closes the cursor on invalid persisted analytics data', async () => {

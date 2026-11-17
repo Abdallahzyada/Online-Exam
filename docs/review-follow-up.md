@@ -24,3 +24,17 @@ the feature branch for team review. No merge is performed.
 Production TLS is checked at the configuration/driver boundary, not against a
 live remote TLS database. Proxy tests exercise address selection locally, not a
 deployed load balancer. These deployment checks remain with the platform owner.
+# Additional runtime checks
+
+- Proxy configuration rejects /0 networks.
+- Environment setup uses randomBytes, private file permissions, and atomic
+  replacement. Explicit --rotate-key replaces an existing custom key; validation
+  does not claim to prove its randomness.
+- Public error messages and codes use a fixed allowlist; unknown codes are generic.
+- Equivalent indexes from other modules are reused without dropping or renaming.
+- Per-attempt question limits return ANALYTICS_LIMIT before schema parsing.
+- Analytics cursor and quiz lookup have bounded database operations. Admission
+  happens before either lookup, and cleanup releases capacity on failure.
+- Successful shutdown clears its deadline; later errors preserve a failure exit.
+- The integration shutdown check coordinates an accepted HTTP request through
+  test-only IPC instead of relying on a 50 ms delay.

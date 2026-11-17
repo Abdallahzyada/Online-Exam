@@ -119,6 +119,11 @@ try {
     assert.ok(indexes.some(index => index.name === 'dashboard_student_history'));
     assert.ok(indexes.some(index => index.name === 'dashboard_quiz_analytics'));
   });
+  await attempts.dropIndex('dashboard_student_history');
+  await attempts.createIndex({ studentId: 1, submittedAt: -1, _id: -1, status: 1 }, { name: 'attempt_owner_history' });
+  const { ensureDashboardIndexes } = await import('../dist/config/dashboard-indexes.js');
+  await ensureDashboardIndexes(connection, 'quizattempts');
+  checked('Equivalent indexes from another module are reused without renaming', () => assert.ok(true));
   const studentToken = await accessToken();
   const adminToken = await accessToken(admin, 'admin');
   const dashboard = await http('/dashboard/me', studentToken);
@@ -181,6 +186,14 @@ try {
     assert.ok(!JSON.stringify(bad.body).includes('questionResults'));
   });
   const oversized = Array.from({ length: 10_001 }, (_, index) => attempt(10_000 + index, { quizId: largeQuiz }));
+  const oversizedAttempt = attempt(99999, { quizId: emptyQuiz, questionResults: Array.from({ length: 1001 }, () => ({ questionId: q1, isCorrect: true })) });
+  await attempts.insertOne(oversizedAttempt);
+  const perAttemptLimit = await http('/admin/quizzes/' + emptyQuiz + '/analytics', adminToken);
+  checked('Per-attempt question-result limit returns 422', () => {
+    assert.equal(perAttemptLimit.status, 422);
+    assert.equal(perAttemptLimit.body.error.code, 'ANALYTICS_LIMIT');
+  });
+  await attempts.deleteOne({ _id: oversizedAttempt._id });
   await attempts.insertMany(oversized);
   const limit = await http('/admin/quizzes/' + largeQuiz + '/analytics', adminToken);
   checked('Oversized analytics rejects instead of returning partial data', () => {
@@ -232,10 +245,12 @@ try {
   checked('Concurrent analytics admission is bounded before loading payloads', () => {
     assert.deepEqual(concurrent.map(response => response.status).sort(), [200, 200, 503]);
   });
-  let drainingFinished = false;
-  const drainingJob = http('/admin/quizzes/' + loadQuiz + '/analytics', adminToken).finally(() => { drainingFinished = true; });
-  await setTimeout(50);
-  assert.equal(drainingFinished, false, 'Shutdown test needs an active request');
+  const armed = once(serverProcess, 'message', { signal: AbortSignal.timeout(5000) });
+  serverProcess.send('arm-drain');
+  assert.equal((await armed)[0], 'drain-armed');
+  const accepted = once(serverProcess, 'message', { signal: AbortSignal.timeout(5000) });
+  const drainingJob = http('/admin/quizzes/' + loadQuiz + '/analytics', adminToken);
+  assert.equal((await accepted)[0], 'request-held');
   serverProcess.send('shutdown');
   const drainedAnalytics = await drainingJob;
   checked('Shutdown drains in-flight analytics before stopping workers', () => assert.equal(drainedAnalytics.status, 200));

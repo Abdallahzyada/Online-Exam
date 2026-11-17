@@ -31,6 +31,9 @@ function setup(options: { dbReady?: boolean; workerReady?: boolean; trustProxy?:
   moduleRouter.get('/test-ip', (req, res) => { res.json({ ip: req.ip }); });
   moduleRouter.get('/test-private-error', (_req, _res, next) => next(new AppError(500, 'INTERNAL_ERROR', 'private-secret', [{ path: 'password', code: 'custom' }])));
   moduleRouter.get('/test-public-error', (_req, _res, next) => next(new ValidationError('Invalid request', [{ path: 'name', code: 'invalid_type' }])));
+  moduleRouter.get('/test-dynamic-error', (_req, _res, next) => next(new AppError(409, 'CONFLICT', 'private-user@example.test')));
+  moduleRouter.get('/test-dynamic-code', (_req, _res, next) => next(new AppError(500, 'private-user@example.test', 'private-context')));
+  moduleRouter.get('/test-unknown-client-code', (_req, _res, next) => next(new AppError(400, 'private-value', 'private-context')));
   const app = createApp({
     auth: createAuth(new JwtVerifier(secret), sessions), dashboard, reportError,
     corsOrigins: ['http://localhost:5173'], moduleRouters: [moduleRouter], trustProxy: options.trustProxy ?? false,
@@ -43,6 +46,16 @@ function setup(options: { dbReady?: boolean; workerReady?: boolean; trustProxy?:
 }
 
 describe('shared application and real JWT verification', () => {
+  it.each([
+    ['/test-dynamic-error', 409, 'CONFLICT', 'Resource conflict'],
+    ['/test-dynamic-code', 500, 'INTERNAL_ERROR', 'Service temporarily unavailable'],
+    ['/test-unknown-client-code', 400, 'REQUEST_ERROR', 'Request could not be completed']
+  ])('never forwards arbitrary error messages or codes for %s', async (path, status, code, message) => {
+    const response = await request(setup().app).get('/api/v1' + path);
+    expect(response.status).toBe(status);
+    expect(response.body).toEqual({ success: false, error: { code, message, details: [] } });
+    expect(JSON.stringify(response.body)).not.toContain('private');
+  });
   it('ignores spoofed forwarding headers by default and honors configured proxy addresses', async () => {
     const untrusted = await request(setup().app).get('/api/v1/test-ip').set('X-Forwarded-For', '203.0.113.25');
     expect(untrusted.body.ip).not.toBe('203.0.113.25');

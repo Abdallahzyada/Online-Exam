@@ -20,7 +20,7 @@ describe('environment validation', () => {
   it('parses explicit trusted proxy networks and rejects blanket trust', () => {
     expect(parseEnvironment({ ...valid, TRUST_PROXY: '127.0.0.1/32,::1/128' }).TRUST_PROXY).toEqual(['127.0.0.1/32', '::1/128']);
     expect(parseEnvironment(valid).TRUST_PROXY).toBe(false);
-    for (const TRUST_PROXY of ['true', '1', '127.0.0.1/33', '::1/129', 'example.com']) {
+    for (const TRUST_PROXY of ['true', '1', '0.0.0.0/0', '::/0', '127.0.0.1/00', '127.0.0.1/33', '::1/129', 'example.com']) {
       expect(() => parseEnvironment({ ...valid, TRUST_PROXY })).toThrow('TRUST_PROXY');
     }
   });

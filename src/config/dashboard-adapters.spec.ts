@@ -47,6 +47,6 @@ describe('read-only shared Mongo adapters', () => {
     await expect(readers.quizzes.exists(id)).resolves.toBe(true);
     await expect(readers.quizzes.exists(id)).resolves.toBe(false);
     expect(collection).toHaveBeenCalledWith('quizzes');
-    expect(findOne).toHaveBeenCalledWith({ _id: new Types.ObjectId(id) }, { projection: { _id: 1 } });
+    expect(findOne).toHaveBeenCalledWith({ _id: new Types.ObjectId(id) }, { projection: { _id: 1 }, timeoutMS: 5000 });
   });
 });

@@ -7,23 +7,28 @@ unfinished feature implementations are outside these results.
 
 ## Latest review checks
 
-- npm run verify: passed.
+- All verification components passed (the integration check was rerun after an IPC assertion correction).
 - TypeScript strict checks and production build: passed.
-- Jest: 149 tests passed across 15 suites.
-- Collected coverage: statements 95.74%, branches 90.55%, functions 96.77%,
-  lines 98.41%. Bootstrap, database connection and worker entry points also have
-  dedicated boundary/live checks. Index creation is verified by live MongoDB;
-  that separate process is not counted in Jest coverage.
+- Jest: 164 tests passed across 16 suites.
+- Collected coverage: statements 96.53%, branches 91.57%, functions 97.61%,
+  lines 99.23%. Bootstrap, database connection and worker entry points also have
+  dedicated boundary/live checks. Index reuse has unit and live database checks.
 - Real worker reuse, distinct concurrent results, idle exit, error, unexpected
   exit and timeout recovery: passed.
 - Exclusive manual-fixture lock contention and release after failure: passed.
-- Live integration: 32 scenarios passed using the real HTTP server, signed JWTs,
+- Private environment-file permissions, atomic replacement, interrupted-write
+  recovery, key preservation and explicit random key rotation: passed on Windows.
+- Live integration: 34 scenarios passed using the real HTTP server, signed JWTs,
   local MongoDB, compound indexes, and the production analytics worker.
 
 New integration checks cover oversized total question results, two admitted
 analytics requests plus one rejected request, draining in-flight analytics before
 stopping workers, repeated shutdown signals, rejected example signing keys, zero
 token lifetimes, and production options that disable database TLS.
+Additional checks cover existing differently named indexes and the per-attempt
+question-result limit. Public error messages/codes and /0 proxy networks have
+regression checks. Database cursor options impose a 5-second lifetime deadline;
+timeout cleanup is checked at the repository boundary, not with a stalled live DB.
 
 Each run uses a unique online_exam_check_ database and drops only that database
 in cleanup. Fixture tests use temporary files; private local state is ignored.
@@ -34,10 +39,10 @@ fake clock and injected cleanup failure, not by breaking real OS resources.
 ## Latest measured workload
 
 - 5,000 attempts with 100,000 question results.
-- Analytics request: about 729 ms.
-- Health replies sampled during that request: 38.
-- Slowest sampled health request: about 47 ms.
-- Event-loop maximum delay: 43.22 ms; p99 delay: 27.12 ms.
+- Analytics request: about 765 ms.
+- Health replies sampled during that request: 42.
+- Slowest sampled health request: about 37 ms.
+- Event-loop maximum delay: 49.84 ms; p99 delay: 23.31 ms.
 
 The check requires the observed maximum to remain below 100 ms for this local
 workload. These observations are not a guarantee for every machine or the

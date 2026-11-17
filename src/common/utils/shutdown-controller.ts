@@ -8,15 +8,19 @@ export interface ShutdownControllerOptions {
 
 export function createShutdownController(options: ShutdownControllerOptions) {
   let closing = false;
+  let finalExitCode = 0;
   return (exitCode = 0): void => {
-    if (closing) return;
+    if (exitCode !== 0) finalExitCode = exitCode;
+    if (closing) { options.setExitCode(finalExitCode); return; }
     closing = true;
-    // Do not keep a healthy process alive; still guard leaked resource handles.
+    // Keep the deadline for failed or hanging cleanup only.
     const deadline = setTimeout(() => options.forceExit(), options.deadlineMs ?? 10_000);
     deadline.unref();
     void Promise.resolve().then(options.shutdown).then(() => {
-      options.setExitCode(exitCode);
+      clearTimeout(deadline);
+      options.setExitCode(finalExitCode);
     }).catch((error: unknown) => {
+      finalExitCode = 1;
       options.setExitCode(1);
       options.report(error);
     });

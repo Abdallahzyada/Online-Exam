@@ -127,3 +127,10 @@ prove the full server's latency target.
 
 Live server and MongoDB integration checks are now available with npm run verify.
 See docs/verification.md for measured results and the remaining team integration scope.
+# Query compatibility
+
+Equivalent non-partial, visible compound indexes are reused even when another
+module chose their names. Startup never drops or renames another module's index.
+Analytics checks each attempt's 1,000-result limit before validating its contents
+and returns 422 for oversized stored attempts. Quiz lookup and analytics cursor
+loading each use a 5-second database deadline. Admission occurs before lookup.

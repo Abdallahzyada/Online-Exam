@@ -13,7 +13,8 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "test:coverage": "npm test -- --coverage",
     "check:integration": "node scripts/check-integration.mjs",
-    "verify": "npm run test:coverage && npm run check:worker && npm run check:manual-lock && npm run check:integration",
+    "verify": "npm run test:coverage && npm run check:worker && npm run check:manual-lock && npm run check:env-setup && npm run check:integration",
+    "check:env-setup": "node scripts/check-env-setup.mjs",
     "manual:seed": "node --env-file=.env scripts/manual-test.mjs seed",
     "manual:cleanup": "node --env-file=.env scripts/manual-test.mjs cleanup",
     "check:manual-lock": "node scripts/check-manual-lock.mjs"
