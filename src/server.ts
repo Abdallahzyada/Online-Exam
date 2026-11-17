@@ -8,6 +8,8 @@ import { AppError, NotFoundError } from './common/errors/app-error.js';
 import { WorkerManager } from './common/workers/worker-manager.js';
 import { EventLoopMonitor } from './common/telemetry/event-loop-monitor.js';
 import { createShutdown } from './common/utils/shutdown.js';
+import { createShutdownController, registerShutdownSignals } from './common/utils/shutdown-controller.js';
+import { ensureDashboardIndexes } from './config/dashboard-indexes.js';
 import { DashboardAnalyticsAdapter } from './modules/dashboard/dashboard.analytics-adapter.js';
 import { MongooseDashboardRepository } from './modules/dashboard/dashboard.repository.js';
 import { createApp } from './app.js';
@@ -22,8 +24,9 @@ async function main(): Promise<void> {
   const monitor = new EventLoopMonitor();
   const workers = new WorkerManager({ timeoutMs: env.WORKER_TIMEOUT_MS, maxPending: env.WORKER_MAX_PENDING, report });
   try {
-    connection = await connectDatabase(env.MONGO_URI);
+    connection = await connectDatabase(env.MONGO_URI, env.NODE_ENV === 'production');
     const database = connection;
+    await ensureDashboardIndexes(database, env.ATTEMPT_COLLECTION);
     const readers = createMongoReaders(database, { users: env.USER_COLLECTION, quizzes: env.QUIZ_COLLECTION });
     const auth = createAuth(new JwtVerifier(env.JWT_SECRET), readers.sessions);
     const errors = {
@@ -33,7 +36,7 @@ async function main(): Promise<void> {
     workers.start();
     monitor.start();
     const app = createApp({
-      auth, reportError: report, corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
+      auth, trustProxy: env.TRUST_PROXY, reportError: report, corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
       dashboard: {
         profiles: readers.profiles, quizzes: readers.quizzes, errors,
         repository: new MongooseDashboardRepository({ connection: database, attemptCollection: env.ATTEMPT_COLLECTION, errors }),
@@ -55,22 +58,12 @@ async function main(): Promise<void> {
       stopWorkers: () => workers.close(), closeDatabase: () => disconnectDatabase(database),
       stopMonitor: () => monitor.stop()
     });
-    let shuttingDown = false;
-    const stop = (exitCode = 0) => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      const deadline = setTimeout(() => { server.closeAllConnections(); process.exit(1); }, 10_000);
-      void shutdown().then(() => {
-        clearTimeout(deadline);
-        process.exitCode = exitCode;
-      }).catch((error: unknown) => {
-        clearTimeout(deadline);
-        report(error);
-        process.exitCode = 1;
-      });
-    };
-    process.once('SIGINT', () => stop());
-    process.once('SIGTERM', () => stop());
+    const stop = createShutdownController({
+      shutdown, report,
+      forceExit: () => { server.closeAllConnections(); process.exit(1); },
+      setExitCode: code => { process.exitCode = code; }
+    });
+    registerShutdownSignals(process, () => stop());
     server.on('error', error => { report(error); stop(1); });
   } catch (error: unknown) {
     await workers.close();

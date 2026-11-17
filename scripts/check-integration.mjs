@@ -114,6 +114,11 @@ try {
   serverProcess.stderr.on('data', data => { serverOutput += data; });
   await ready();
   checked('Server bootstrap and real database/worker readiness', () => assert.ok(true));
+  const indexes = await attempts.listIndexes().toArray();
+  checked('History and analytics compound indexes are provisioned', () => {
+    assert.ok(indexes.some(index => index.name === 'dashboard_student_history'));
+    assert.ok(indexes.some(index => index.name === 'dashboard_quiz_analytics'));
+  });
   const studentToken = await accessToken();
   const adminToken = await accessToken(admin, 'admin');
   const dashboard = await http('/dashboard/me', studentToken);
@@ -215,13 +220,34 @@ try {
     healthSamples: healthSamples.length, maxHealthRequestMs: Math.round(Math.max(...healthSamples.map(sample => sample.requestMs))),
     eventLoop: finalHealth.body.data.eventLoop
   };
+  const excess = attempt(90000, { quizId: loadQuiz, questionResults: questions });
+  await attempts.insertOne(excess);
+  const aggregateLimit = await http('/admin/quizzes/' + loadQuiz + '/analytics', adminToken);
+  checked('Aggregate question-result limit rejects before worker dispatch', () => {
+    assert.equal(aggregateLimit.status, 422);
+    assert.equal(aggregateLimit.body.error.code, 'ANALYTICS_LIMIT');
+  });
+  await attempts.deleteOne({ _id: excess._id });
+  const concurrent = await Promise.all(Array.from({ length: 3 }, () => http('/admin/quizzes/' + loadQuiz + '/analytics', adminToken)));
+  checked('Concurrent analytics admission is bounded before loading payloads', () => {
+    assert.deepEqual(concurrent.map(response => response.status).sort(), [200, 200, 503]);
+  });
+  let drainingFinished = false;
+  const drainingJob = http('/admin/quizzes/' + loadQuiz + '/analytics', adminToken).finally(() => { drainingFinished = true; });
+  await setTimeout(50);
+  assert.equal(drainingFinished, false, 'Shutdown test needs an active request');
   serverProcess.send('shutdown');
+  const drainedAnalytics = await drainingJob;
+  checked('Shutdown drains in-flight analytics before stopping workers', () => assert.equal(drainedAnalytics.status, 200));
   const [exitCode] = await Promise.race([
     serverExit, setTimeout(12_000, null, { ref: false }).then(() => { throw new Error('Graceful shutdown timed out'); })
   ]);
   checked('Real HTTP server, worker, and database shutdown exits cleanly', () => assert.equal(exitCode, 0));
   serverProcess = undefined;
   await assertStartupFails({ JWT_SECRET: 'short' }, 'Invalid environment fails startup', 'Invalid environment:');
+  await assertStartupFails({ JWT_SECRET: 'replace-with-a-random-secret-at-least-32-characters' }, 'Example JWT secret is rejected at startup', 'JWT_SECRET');
+  await assertStartupFails({ JWT_EXPIRES_IN: '0h' }, 'Zero token lifetime is rejected at startup', 'JWT_EXPIRES_IN');
+  await assertStartupFails({ NODE_ENV: 'production', MONGO_URI: 'mongodb://127.0.0.1:27017/test?tls=false' }, 'Production plaintext MongoDB is rejected before connecting', 'MONGO_URI');
   await assertStartupFails({ MONGO_URI: 'mongodb://127.0.0.1:1/unreachable' }, 'Unavailable database fails startup without leaked configuration', 'Server could not start.');
   const blocker = createServer();
   blocker.listen(port);

@@ -17,7 +17,10 @@ export function makeDependencies(): DashboardDependencies {
     },
     profiles: { findProfile: jest.fn<DashboardDependencies['profiles']['findProfile']>().mockResolvedValue(profile) },
     quizzes: { exists: jest.fn<DashboardDependencies['quizzes']['exists']>().mockResolvedValue(true) },
-    analytics: { execute: jest.fn<DashboardDependencies['analytics']['execute']>().mockResolvedValue(emptyAnalytics) },
+    analytics: {
+      withCapacity: async work => work(),
+      execute: jest.fn<DashboardDependencies['analytics']['execute']>().mockResolvedValue(emptyAnalytics)
+    },
     errors: {
       notFound: resource => new Error(`${resource} not found`),
       analyticsLimit: () => new Error('Analytics dataset limit reached')

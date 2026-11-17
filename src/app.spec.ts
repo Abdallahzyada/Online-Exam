@@ -9,6 +9,7 @@ import { makeDependencies, studentId } from './modules/dashboard/testing/fixture
 import { validateRequest } from './common/middlewares/validate-request.js';
 import { asyncHandler } from './common/middlewares/async-handler.js';
 import { z } from 'zod';
+import { AppError, ValidationError } from './common/errors/app-error.js';
 
 const secret = 'test-secret-with-at-least-32-characters';
 const key = new TextEncoder().encode(secret);
@@ -18,7 +19,7 @@ async function token(options: { secret?: string; role?: string; version?: number
     .setExpirationTime(options.expiry ?? Math.floor(Date.now() / 1000) + 300)
     .sign(options.secret ? new TextEncoder().encode(options.secret) : key);
 }
-function setup(options: { dbReady?: boolean; workerReady?: boolean } = {}) {
+function setup(options: { dbReady?: boolean; workerReady?: boolean; trustProxy?: false | readonly string[] } = {}) {
   const sessions: SessionReader = { findSession: jest.fn<SessionReader['findSession']>().mockResolvedValue({ role: 'student', tokenVersion: 0 }) };
   const dashboard = makeDependencies();
   const reportError = jest.fn();
@@ -27,9 +28,12 @@ function setup(options: { dbReady?: boolean; workerReady?: boolean } = {}) {
     res.json({ parsed: res.locals.body, original: req.body });
   });
   moduleRouter.get('/test-failure', asyncHandler(async () => { throw new Error('private stack and data'); }));
+  moduleRouter.get('/test-ip', (req, res) => { res.json({ ip: req.ip }); });
+  moduleRouter.get('/test-private-error', (_req, _res, next) => next(new AppError(500, 'INTERNAL_ERROR', 'private-secret', [{ path: 'password', code: 'custom' }])));
+  moduleRouter.get('/test-public-error', (_req, _res, next) => next(new ValidationError('Invalid request', [{ path: 'name', code: 'invalid_type' }])));
   const app = createApp({
     auth: createAuth(new JwtVerifier(secret), sessions), dashboard, reportError,
-    corsOrigins: ['http://localhost:5173'], moduleRouters: [moduleRouter],
+    corsOrigins: ['http://localhost:5173'], moduleRouters: [moduleRouter], trustProxy: options.trustProxy ?? false,
     health: {
       dbReady: () => options.dbReady ?? true, workerReady: () => options.workerReady ?? true,
       uptime: () => 12, eventLoop: { snapshot: () => ({ meanDelayMs: 1, maxDelayMs: 2, p99DelayMs: 2 }) }
@@ -39,6 +43,23 @@ function setup(options: { dbReady?: boolean; workerReady?: boolean } = {}) {
 }
 
 describe('shared application and real JWT verification', () => {
+  it('ignores spoofed forwarding headers by default and honors configured proxy addresses', async () => {
+    const untrusted = await request(setup().app).get('/api/v1/test-ip').set('X-Forwarded-For', '203.0.113.25');
+    expect(untrusted.body.ip).not.toBe('203.0.113.25');
+    const trusted = await request(setup({ trustProxy: ['127.0.0.1/8', '::1/128'] }).app).get('/api/v1/test-ip').set('X-Forwarded-For', '203.0.113.25');
+    expect(trusted.body.ip).toBe('203.0.113.25');
+  });
+  it('hides internal AppError messages and details while reporting the failure', async () => {
+    const { app, reportError } = setup();
+    const response = await request(app).get('/api/v1/test-private-error');
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Service temporarily unavailable', details: [] } });
+    expect(reportError).toHaveBeenCalledTimes(1);
+  });
+  it('allows only the public error detail contract', async () => {
+    const response = await request(setup().app).get('/api/v1/test-public-error');
+    expect(response.body.error.details).toEqual([{ path: 'name', code: 'invalid_type', message: 'Invalid field value' }]);
+  });
   it('exposes public health with the canonical envelope and security headers', async () => {
     const { app } = setup();
     const response = await request(app).get('/api/v1/health');
@@ -108,7 +129,11 @@ describe('shared application and real JWT verification', () => {
   it('returns validation errors without echoing field values', async () => {
     const response = await request(setup().app).post('/api/v1/test-validation').send({ name: 12 });
     expect(response.status).toBe(400);
-    expect(response.body.error).toMatchObject({ code: 'VALIDATION_ERROR', details: [{ path: 'name' }] });
+    expect(response.body).toEqual({ success: false, error: {
+      code: 'VALIDATION_ERROR', message: 'Invalid request',
+      details: [{ path: 'name', code: 'invalid_type', message: 'Invalid field value' }]
+    } });
+    expect(JSON.stringify(response.body)).not.toContain('12');
   });
   it('passes parsed data to handlers', async () => {
     const response = await request(setup().app).post('/api/v1/test-validation').send({ name: 'Mohammed' });

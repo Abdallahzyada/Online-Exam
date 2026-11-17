@@ -3,6 +3,13 @@ import { DashboardService } from './dashboard.service.js';
 import { emptyAnalytics, makeAttempt, makeDependencies, profile, quizId, studentId } from './testing/fixtures.js';
 
 describe('DashboardService', () => {
+  it('rejects admission before loading analytics documents', async () => {
+    const dependencies = makeDependencies();
+    dependencies.analytics.withCapacity = async () => { throw new Error('Analytics admission limit reached'); };
+    await expect(new DashboardService(dependencies).getAnalytics(quizId)).rejects.toThrow('admission limit');
+    expect(dependencies.repository.getAnalyticsAttempts).not.toHaveBeenCalled();
+    expect(dependencies.analytics.execute).not.toHaveBeenCalled();
+  });
   it('returns the profile and student-scoped database KPIs', async () => {
     const dependencies = makeDependencies();
     const kpis = { quizzesPassed: 2, fastestTimeSeconds: 120, totalCorrectAnswers: 35 };

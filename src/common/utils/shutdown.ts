@@ -5,19 +5,19 @@ export interface ShutdownResources {
   stopMonitor(): void;
 }
 
-// One shared promise makes repeated signals safe.
+// Drain admitted HTTP requests while workers and MongoDB are still available.
 export function createShutdown(resources: ShutdownResources): () => Promise<void> {
   let closing: Promise<void> | undefined;
   return () => {
     closing ??= (async () => {
-      const drained = await Promise.allSettled([
-        Promise.resolve().then(() => resources.stopHttp()),
-        Promise.resolve().then(() => resources.stopWorkers())
-      ]);
-      const database = await Promise.allSettled([Promise.resolve().then(() => resources.closeDatabase())]);
-      resources.stopMonitor();
-      const failures = [...drained, ...database].filter(result => result.status === 'rejected');
-      if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Shutdown did not complete cleanly');
+      const failures: unknown[] = [];
+      for (const close of [
+        () => resources.stopHttp(), () => resources.stopWorkers(),
+        () => resources.closeDatabase(), () => resources.stopMonitor()
+      ]) {
+        try { await close(); } catch (error: unknown) { failures.push(error); }
+      }
+      if (failures.length) throw new AggregateError(failures, 'Shutdown did not complete cleanly');
     })();
     return closing;
   };

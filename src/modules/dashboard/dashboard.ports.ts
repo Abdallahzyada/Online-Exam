@@ -20,6 +20,7 @@ export interface QuizReader {
   exists(quizId: string): Promise<boolean>;
 }
 export interface AnalyticsExecutor {
+  withCapacity<T>(work: () => Promise<T>): Promise<T>;
   execute(payload: AnalyticsPayload): Promise<AnalyticsResponse>;
 }
 export interface DashboardErrors {
@@ -33,5 +34,6 @@ export interface DashboardAuth {
   studentId(request: Request): string;
 }
 export interface SharedWorkerPort {
+  withCapacity<T>(work: () => Promise<T>): Promise<T>;
   run(task: { readonly taskType: 'quiz-analytics'; readonly payload: AnalyticsPayload }): Promise<AnalyticsResponse>;
 }

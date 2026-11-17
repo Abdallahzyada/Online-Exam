@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { paginationSchema } from '../../common/utils/pagination.js';
+import { MAX_ANALYTICS_ATTEMPTS, MAX_QUESTIONS_PER_ATTEMPT, questionResultCount } from './analytics-limits.js';
 
-export const objectIdSchema = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid resource ID');
+export const objectIdSchema = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid resource ID').transform(value => value.toLowerCase());
 export const historyQuerySchema = paginationSchema;
 export const analyticsParamsSchema = z.object({ quizId: objectIdSchema }).strict();
 export const emptyQuerySchema = z.object({}).strict();
@@ -53,11 +54,15 @@ export const analyticsAttemptSchema = z.object({
   attemptId: objectIdSchema,
   scorePercentage: z.number().finite().min(0).max(100),
   timeSpentSeconds: z.number().finite().nonnegative(),
-  questionResults: z.array(questionResultSchema).max(1000)
+  questionResults: z.array(questionResultSchema).max(MAX_QUESTIONS_PER_ATTEMPT)
 }).strict();
-export const analyticsPayloadSchema = z.object({
-  attempts: z.array(analyticsAttemptSchema).max(10_000)
-}).strict();
+export const analyticsPayloadSchema = z.preprocess((payload, context) => {
+  if (questionResultCount(payload) === null) {
+    context.addIssue({ code: 'custom', message: 'Invalid analytics payload or aggregate question-result limit exceeded' });
+    return z.NEVER;
+  }
+  return payload;
+}, z.object({ attempts: z.array(analyticsAttemptSchema).max(MAX_ANALYTICS_ATTEMPTS) }).strict());
 export type AnalyticsAttempt = z.infer<typeof analyticsAttemptSchema>;
 export type AnalyticsPayload = z.infer<typeof analyticsPayloadSchema>;
 export const analyticsResponseSchema = z.object({

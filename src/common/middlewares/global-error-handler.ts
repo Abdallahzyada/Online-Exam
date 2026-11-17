@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler } from 'express';
 import { z } from 'zod';
 import { AppError } from '../errors/app-error.js';
+import { publicErrorDetails } from '../errors/public-details.js';
 
 export function createErrorHandler(report: (error: unknown) => void): ErrorRequestHandler {
   return (error: unknown, _req, res, next) => {
@@ -8,13 +9,15 @@ export function createErrorHandler(report: (error: unknown) => void): ErrorReque
     if (error instanceof z.ZodError) {
       res.status(400).json({ success: false, error: {
         code: 'VALIDATION_ERROR', message: 'Invalid request',
-        details: error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message }))
+        details: publicErrorDetails(error.issues.map(issue => ({ path: issue.path.join('.'), code: issue.code })))
       } });
       return;
     }
     if (error instanceof AppError) {
+      if (error.statusCode >= 500) report(error);
       res.status(error.statusCode).json({ success: false, error: {
-        code: error.code, message: error.message, details: error.details
+        code: error.code, message: error.statusCode >= 500 ? 'Service temporarily unavailable' : error.message,
+        details: error.statusCode >= 500 ? [] : publicErrorDetails(error.details)
       } });
       return;
     }

@@ -31,7 +31,9 @@ export class DashboardService {
   async getAnalytics(quizId: string): Promise<AnalyticsResponse> {
     const { quizzes, repository, analytics, errors } = this.dependencies;
     if (!await quizzes.exists(quizId)) throw errors.notFound('quiz');
-    const attempts = await repository.getAnalyticsAttempts(quizId);
-    return analytics.execute({ attempts: [...attempts] });
+    return analytics.withCapacity(async () => {
+      const attempts = await repository.getAnalyticsAttempts(quizId);
+      return analytics.execute({ attempts: [...attempts] });
+    });
   }
 }

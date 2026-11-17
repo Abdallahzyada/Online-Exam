@@ -83,6 +83,20 @@ describe('dashboard MongoDB aggregation semantics', () => {
 });
 
 describe('analytics repository cursor', () => {
+  it('stops and closes the cursor when total question results exceed the job budget', async () => {
+    const close = jest.fn<() => Promise<void>>().mockResolvedValue();
+    let documentsRead = 0;
+    const questions = Array.from({ length: 1000 }, (_, index) => ({ questionId: index.toString(16).padStart(24, '0'), isCorrect: true }));
+    const cursor = { async *[Symbol.asyncIterator]() {
+      for (let index = 0; index < 200; index++) {
+        documentsRead++;
+        yield { ...makeAttempt(index, 50, 10), questionResults: questions };
+      }
+    }, close };
+    await expect(repositoryWith({ aggregate: () => cursor }).getAnalyticsAttempts(quizId)).rejects.toThrow('Analytics dataset limit reached');
+    expect(documentsRead).toBe(101);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
   it('reads validated summaries and closes the cursor', async () => {
     const attempt = makeAttempt(1, 50, 10);
     const close = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);

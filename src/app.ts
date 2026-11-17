@@ -18,11 +18,13 @@ export interface ApplicationDependencies {
   readonly corsOrigins: readonly string[];
   readonly reportError: (error: unknown) => void;
   readonly moduleRouters?: readonly Router[];
+  readonly trustProxy?: false | readonly string[];
 }
 
 export function createApp(dependencies: ApplicationDependencies) {
   const app = express();
   app.disable('x-powered-by');
+  app.set('trust proxy', dependencies.trustProxy ? [...dependencies.trustProxy] : false);
   app.use(helmet());
   app.use(cors({ origin: [...dependencies.corsOrigins] }));
   app.use('/api/v1', createHealthRouter(dependencies.health));

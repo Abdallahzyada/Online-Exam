@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import type { Connection, Collection, PipelineStage } from 'mongoose';
 import { analyticsAttemptSchema } from './dashboard.dto.js';
+import { MAX_QUESTION_RESULTS } from './analytics-limits.js';
 import type { AnalyticsAttempt, DashboardKpis, HistoryEntry, HistoryQuery } from './dashboard.dto.js';
 import type { DashboardErrors, DashboardRepository, HistoryRecords } from './dashboard.ports.js';
 
@@ -24,9 +25,9 @@ export function buildKpisPipeline(studentId: string): PipelineStage[] {
 export function buildHistoryPipeline(studentId: string, query: HistoryQuery): PipelineStage[] {
   return [
     { $match: { studentId: new Types.ObjectId(studentId), status: { $in: ['SUBMITTED', 'EXPIRED'] } } },
+    { $sort: { submittedAt: -1, _id: -1 } },
     { $facet: {
       entries: [
-        { $sort: { submittedAt: -1, _id: -1 } },
         { $skip: (query.page - 1) * query.limit }, { $limit: query.limit },
         { $project: {
           _id: 0, attemptId: { $toString: '$_id' }, quizId: { $toString: '$quizId' },
@@ -83,15 +84,18 @@ export class MongooseDashboardRepository implements DashboardRepository {
       { $limit: 10_001 },
       { $project: {
         _id: 0, attemptId: { $toString: '$_id' }, scorePercentage: 1,
-        timeSpentSeconds: 1, questionResults: 1
+        timeSpentSeconds: 1, questionResults: { $slice: ['$questionResults', 1001] }
       } }
     ], { batchSize: 100 });
     const attempts: AnalyticsAttempt[] = [];
+    let questionResults = 0;
     try {
       for await (const document of cursor) {
         if (attempts.length === 10_000) throw this.options.errors.analyticsLimit();
         const parsed = analyticsAttemptSchema.safeParse(document);
         if (!parsed.success) throw new Error('Stored analytics data does not match the shared contract');
+        questionResults += parsed.data.questionResults.length;
+        if (questionResults > MAX_QUESTION_RESULTS) throw this.options.errors.analyticsLimit();
         attempts.push(parsed.data);
       }
       return attempts;

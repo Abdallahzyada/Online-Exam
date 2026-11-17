@@ -2,73 +2,69 @@
 
 Date: 2026-11-17
 
-Scope: Dashboard and Analytics plus the shared foundation currently in this
-repository. Other members' unfinished Auth, Catalog, Question, and Attempt
-features are outside this result.
+Scope: Dashboard and Analytics plus the shared foundation. Other members'
+unfinished feature implementations are outside these results.
 
-## Results
+## Latest review checks
 
-- TypeScript strict checks: passed.
-- Production build: passed.
-- Jest: 109 tests passed across 11 suites.
-- Collected coverage: statements 96.40%, branches 89.24%, functions 96.07%,
-  lines 98.99%. Server bootstrap, the database connection helper, and the worker
-  entry point are exercised by the real integration checks rather than included
-  in Jest coverage.
-- Real worker checks: reuse, concurrent request correlation, idle termination,
-  error, unexpected exit, and timeout recovery passed. Both pending requests
-  rejected on each injected failure, and the replacement completed the next job.
-- Live integration: 25 scenarios passed through the actual server process, local
-  MongoDB, signed JWTs, and the production worker manager.
-- Startup checks: invalid environment, unavailable MongoDB, and an occupied HTTP
-  port failed cleanly with exit code 1.
-- Graceful shutdown: the real SIGTERM callback closed the server, worker and
-  database and exited with code 0. The Windows test bridge emits that signal
-  inside the child process; it does not claim to test Windows OS signal delivery.
+- npm run verify: passed.
+- TypeScript strict checks and production build: passed.
+- Jest: 149 tests passed across 15 suites.
+- Collected coverage: statements 95.74%, branches 90.55%, functions 96.77%,
+  lines 98.41%. Bootstrap, database connection and worker entry points also have
+  dedicated boundary/live checks. Index creation is verified by live MongoDB;
+  that separate process is not counted in Jest coverage.
+- Real worker reuse, distinct concurrent results, idle exit, error, unexpected
+  exit and timeout recovery: passed.
+- Exclusive manual-fixture lock contention and release after failure: passed.
+- Live integration: 32 scenarios passed using the real HTTP server, signed JWTs,
+  local MongoDB, compound indexes, and the production analytics worker.
 
-The integration checks cover student data isolation, empty/all-failed KPIs,
-pagination, UTC timestamps, safe projections, submitted-only analytics, role
-checks, stored token revocation, validation errors, malformed stored data, and
-the analytics size limit. They use a unique temporary database starting with
-online_exam_check_ and drop only that database in cleanup.
+New integration checks cover oversized total question results, two admitted
+analytics requests plus one rejected request, draining in-flight analytics before
+stopping workers, repeated shutdown signals, rejected example signing keys, zero
+token lifetimes, and production options that disable database TLS.
 
-## Local workload observation
+Each run uses a unique online_exam_check_ database and drops only that database
+in cleanup. Fixture tests use temporary files; private local state is ignored.
+The Windows child bridge emits signals inside the process; it does not claim to
+test Windows OS signal delivery. The failed-cleanup deadline is tested with a
+fake clock and injected cleanup failure, not by breaking real OS resources.
 
-One analytics request processed 5,000 attempts with 100,000 question results.
+## Latest measured workload
 
-- Analytics request: about 1,005 ms.
-- Health replies sampled during the request: 49.
-- Slowest sampled health request: about 68 ms.
-- Event-loop maximum delay: 75.89 ms.
-- Event-loop p99 delay: 28.11 ms.
+- 5,000 attempts with 100,000 question results.
+- Analytics request: about 729 ms.
+- Health replies sampled during that request: 38.
+- Slowest sampled health request: about 47 ms.
+- Event-loop maximum delay: 43.22 ms; p99 delay: 27.12 ms.
 
-The check requires the observed event-loop maximum to stay below 100 ms.
-These are observations on this computer for this workload, not a guarantee for
-all datasets, machines, or the completed team application.
+The check requires the observed maximum to remain below 100 ms for this local
+workload. These observations are not a guarantee for every machine or the
+finished application. Concurrency and size limits bound accepted work.
 
-## Fix from this review
+## Review changes
 
-An unmatched path under /api/v1 previously returned 401 because the Dashboard
-router authenticated every request before matching a route. Authentication now
-runs on each matching Dashboard route. A regression test confirms unknown API
-paths return 404 while protected routes keep their 401/403 checks.
+See review-follow-up.md for all fifteen points and their regression checks.
+An earlier review also fixed unknown API paths returning 401 instead of 404.
 
-## Dependency audit
+## Dependency audit and remaining integration
 
-npm audit --omit=dev reported zero known vulnerabilities in runtime dependencies.
-The full audit reports 18 moderate affected package entries in the Jest tooling
-chain, rooted in glob and minimatch. Compatible updates were applied; these
-remaining findings require a separate dependency decision. No forced major
-version downgrade was applied.
+The latest runtime dependency audit reported zero known vulnerabilities. The
+full audit has 18 moderate affected entries in the Jest development-tool chain,
+rooted in glob/minimatch. No forced major-version downgrade was applied.
 
-## Repeat
+Production database TLS is verified at the configuration/driver boundary;
+testing an actual TLS database and deployed proxy remains a deployment check.
+Module owners must confirm stored fields, collection names, shared index names,
+and feature contracts. Registration, login/logout mutations, recovery, catalog,
+submission, and streaming flows need tests when those implementations arrive.
 
-Run npm run verify with local MongoDB available at 127.0.0.1:27017.
-It runs coverage tests, builds the project, tests real workers, then runs the
-live integration checks. Integration checks use generated secrets and fixtures,
-not a user's .env or existing database. npm run check:integration alone assumes
-the current source has already been built.
+## Repeat locally
 
-Before team merge, confirm collection names and stored fields with module
-owners. Full registration, login/logout mutations, password recovery, catalog,
-quiz submission, and streaming flows must be tested once those modules arrive.
+Run npm ci, npm run setup:env, then npm run verify. Local MongoDB must be available
+at 127.0.0.1:27017 for live integration checks. setup:env generates a signing key
+without displaying it. Restart a running server after a key change and create a
+new manual token. npm run check:integration alone requires a current build.
+
+No merge is performed by these commands.

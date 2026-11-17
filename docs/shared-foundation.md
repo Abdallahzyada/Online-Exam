@@ -1,18 +1,24 @@
 # Shared foundation for team review
 
-All changes are local. This is a proposed common base for the six-person team.
+This is a proposed common base for the six-person team, submitted for review.
 Review it with Abdallah before merging. Other members keep ownership of their
 Auth, Catalog, Question, and Attempt modules. No duplicate models are defined.
 
 ## Start locally
 
-Use Node.js 22.18 or newer. Run `npm ci`. Copy `.env.example` to `.env`, set a
-random JWT secret, and set your MongoDB URL. Start MongoDB, then run `npm run dev`.
+Use Node.js 22.18 or newer. Run `npm ci`, then `npm run setup:env`. This creates
+the local .env and replaces a missing or sample signing key with 32 cryptographic
+random bytes encoded as 64 hex characters. Existing custom keys are preserved.
+Startup rejects the placeholder, invalid key format, and obvious repeated keys.
+Set your MongoDB URL. Start MongoDB, then run `npm run dev`.
 This builds and starts the server; it does not watch files. For later starts,
 run `npm run build` and `npm start`. Open `http://localhost:3000/api/v1/health`.
 
 Environment values are checked before connecting to MongoDB. Invalid fields stop
 startup. Health returns 503 while the database or analytics worker is not ready.
+JWT_EXPIRES_IN must be positive. Production forces verified MongoDB TLS, even
+for a mongodb:// URI, and rejects URI options that disable TLS or certificate
+verification. Plain loopback MongoDB is supported in development/test.
 No user accounts, login route, or seed data are created by the shared foundation.
 Protected routes require a valid token and an existing user document.
 
@@ -51,7 +57,8 @@ Protected routes require a valid token and an existing user document.
 - Use `validateRequest(schema, source, key)` for body, query, or params. Parsed
   values are in `res.locals[key]`; Express 5 query is not overwritten.
 - Use shared error classes and response helpers. Unknown errors return a generic
-  500 response. Validation details contain field paths, not field values.
+  500 response. Details accept only public field paths and issue codes; messages
+  are static and unknown fields are stripped. Server-error details are omitted.
 - EmailSender is an interface for Auth to implement. No email provider or OTP
   logging is configured by this base.
 
@@ -59,10 +66,15 @@ Protected routes require a valid token and an existing user document.
 
 One worker starts with the server. Requests carry requestId, taskType, and payload.
 The manager rejects work while starting or when the pending limit is reached.
-The default limit is four pending jobs. Timeouts terminate the stuck worker and
+The default worker queue limit is four pending jobs, with a separate limit of
+two complete analytics requests admitted before any database payload is loaded.
+Each payload allows at most 100,000 question results, and pending worker jobs
+share a budget of 200,000 question results. Timeouts terminate the stuck worker and
 reject all its pending jobs. Error and unexpected exit do the same. A replacement
 starts with bounded retry delay; old worker messages cannot resolve new jobs.
-Calculation failures reject that job while keeping the worker alive.
+Calculation failures reject that job while keeping the worker alive. Timeouts,
+calculation failures, and unexpected exits are reported through the operational
+callback with safe error codes.
 
 The default request timeout is 30 seconds. The worker protocol currently registers
 `quiz-analytics`; future task types need explicit request and response contracts.
@@ -70,24 +82,40 @@ This is the one shared manager: modules should not create their own Worker.
 
 Health reports event-loop delays in milliseconds, database status, and worker
 readiness. Monitoring starts at bootstrap, not on each request. Measurements are
-since process startup. SIGINT and SIGTERM stop HTTP admission, reject/stop worker
-jobs, drain HTTP requests, close MongoDB, and stop monitoring. A 10-second safety
-deadline forces exit if shutdown hangs.
+since process startup. SIGINT and SIGTERM stop HTTP admission and drain active
+requests while workers and MongoDB remain available, then stop workers, close
+MongoDB and stop monitoring. Repeated signals use the same guarded shutdown.
+An unref'ed 10-second safety deadline remains armed even after cleanup fails;
+it does not keep a clean process alive.
 
 The API JSON limit is 100 KB. NDJSON streaming imports use a different content
 type and are not consumed by the JSON parser. The global limit is 300 requests
 per IP per 15 minutes per server process. Auth should add stricter login and OTP
-limits. Behind a reverse proxy, review `trust proxy` and use a shared rate-limit
-store if running multiple processes. CORS uses the comma-separated origin list
+limits. TRUST_PROXY is empty by default: forwarded client addresses are ignored.
+For a real reverse proxy, explicitly list only its known IPs or CIDRs, for example
+127.0.0.1/32,::1/128 for a same-machine proxy. Boolean blanket trust and implicit
+hop counts are rejected. Use a shared rate-limit store for multiple processes.
+CORS uses the comma-separated origin list
 in CORS_ORIGINS. Health is public and outside the API rate limit.
 
 ## Verification
 
 Run `npm run verify` with local MongoDB available at 127.0.0.1:27017.
 This runs Jest coverage, builds the project, checks real worker failures and
-recovery, then runs 25 live integration scenarios through the server and MongoDB.
+recovery, fixture-lock checks, then live integration scenarios through the server and MongoDB.
 A unique temporary test database is removed after the integration run.
 
 See `verification.md` for measured results, dependency audit findings, and scope.
 Full login/logout mutations, other module flows, proxy settings, and performance
 with the finished team project still need integration checks.
+
+## Manual fixtures
+
+Run npm run manual:seed to create a test student and three attempts and print a
+one-hour local token. Run npm run manual:cleanup to delete only those marked
+records. Both commands acquire the same exclusive lock across state-file and
+database operations. A concurrent command fails without changing records.
+If a process is forcibly killed, confirm that it has stopped before removing its
+stale .local/manual-test.lock file and retrying. Local state and .env are ignored
+by Git. Restart a running server after a signing-key change and generate a fresh
+manual token; old tokens will no longer authenticate.

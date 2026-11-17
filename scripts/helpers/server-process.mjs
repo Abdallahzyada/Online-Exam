@@ -2,6 +2,8 @@
 process.on('message', message => {
   if (message === 'shutdown') {
     process.emit('SIGTERM');
+    process.emit('SIGTERM');
+    process.emit('SIGINT');
     process.disconnect();
   }
 });

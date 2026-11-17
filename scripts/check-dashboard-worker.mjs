@@ -33,7 +33,13 @@ const manager = new WorkerManager({
 try {
   manager.start();
   await waitUntilReady(manager);
-  (await Promise.all([manager.run(task), manager.run(task)])).forEach(verifyResult);
+  const otherTask = { taskType: 'quiz-analytics', payload: { attempts: [{
+    attemptId: '111111111111111111111111', scorePercentage: 100, timeSpentSeconds: 7, questionResults: []
+  }] } };
+  const [first, second] = await Promise.all([manager.run(task), manager.run(otherTask)]);
+  verifyResult(first);
+  assert.deepEqual(second.latency, { p50: 7, p90: 7 });
+  assert.equal(second.percentileRankings.length, 1);
   assert.equal(handles.length, 1);
   await handles[0].terminate();
   await waitUntilReady(manager);

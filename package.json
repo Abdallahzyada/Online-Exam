@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "setup:env": "node scripts/setup-env.mjs",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "dev": "npm run build && npm start",
     "build": "tsc -p tsconfig.build.json",
@@ -12,9 +13,10 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "test:coverage": "npm test -- --coverage",
     "check:integration": "node scripts/check-integration.mjs",
-    "verify": "npm run test:coverage && npm run check:worker && npm run check:integration",
+    "verify": "npm run test:coverage && npm run check:worker && npm run check:manual-lock && npm run check:integration",
     "manual:seed": "node --env-file=.env scripts/manual-test.mjs seed",
-    "manual:cleanup": "node --env-file=.env scripts/manual-test.mjs cleanup"
+    "manual:cleanup": "node --env-file=.env scripts/manual-test.mjs cleanup",
+    "check:manual-lock": "node scripts/check-manual-lock.mjs"
   },
   "engines": {
     "node": ">=22.18.0"
@@ -25,6 +27,7 @@
     "express-rate-limit": "^8.7.4",
     "helmet": "^8.3.0",
     "jose": "^6.2.17",
+    "mongodb-connection-string-url": "^7.0.3",
     "mongoose": "^9.12.2",
     "zod": "^4.6.7"
   },

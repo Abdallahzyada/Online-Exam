@@ -61,9 +61,11 @@ as incorrect. Do not include answer keys. The question ID is a hexadecimal strin
 in this read contract. If the shared model stores different names or ObjectIds
 inside this array, adapt the repository projection before connecting it.
 
-Agree on these fields with the Attempt owner before merging. Suggested indexes,
-owned by that module, are `(studentId, status, submittedAt, _id)` and
-`(quizId, status, _id)`. ProfileReader belongs to the Auth adapter; QuizReader
+Agree on these fields with the Attempt owner before merging. Bootstrap creates
+dashboard_student_history `(studentId, submittedAt descending, _id descending, status)`
+and dashboard_quiz_analytics `(quizId, status, _id)` indexes. Use these same names
+in the shared model. History sorts before its facet so the index can supply
+the order. ProfileReader belongs to the Auth adapter; QuizReader
 belongs to the quiz adapter. A missing student or quiz uses the shared not-found
 error factory.
 
@@ -92,9 +94,16 @@ for review, because the requirements do not fix every formula:
   A missing group or a question absent from a group returns null.
 
 Older snapshots with a missing question do not count as incorrect observations.
-Duplicate question IDs within one attempt are rejected.
+Question IDs are normalized to lowercase. Case-variant IDs are combined across
+attempts and rejected as duplicates within the same attempt.
 
 Each calculation accepts at most 10,000 attempts and 1,000 questions per attempt.
+It also accepts at most 100,000 question results in total. Shallow preflight
+checks this before cloning nested inputs; the repository stops reading when the
+aggregate limit is reached. Two analytics requests at most may load data or
+compute concurrently, and pending worker jobs share a 200,000-result budget.
+withCapacity reserves admission before database loading and releases it on
+success or failure. Saturation returns 503; payload size violations return 422.
 The repository reads at most 10,001 attempts and rejects an oversized quiz using
 the injected analyticsLimit error; it never silently reports partial results.
 The bootstrap maps this error to 422 `ANALYTICS_LIMIT`, for team review. For larger

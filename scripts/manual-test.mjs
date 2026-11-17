@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import { SignJWT } from 'jose';
 import { z } from 'zod';
 import { parseEnvironment } from '../dist/config/env.js';
+import { withFileLock } from './helpers/file-lock.mjs';
 
 const mode = process.argv[2];
 if (!['seed', 'cleanup'].includes(mode)) throw new Error('Use seed or cleanup');
@@ -18,6 +19,7 @@ const stateSchema = z.object({
   studentId: idSchema, quizId: idSchema,
   attemptIds: z.array(idSchema).length(3), questionIds: z.array(idSchema).length(2)
 }).strict();
+await withFileLock(new URL('../.local/manual-test.lock', import.meta.url), async () => {
 const connection = mongoose.createConnection(env.MONGO_URI, { serverSelectionTimeoutMS: 5000 });
 try {
   await connection.asPromise();
@@ -100,3 +102,4 @@ try {
 } finally {
   await connection.close();
 }
+});

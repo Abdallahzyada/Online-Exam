@@ -1,9 +1,11 @@
+import type { PublicErrorDetail } from './public-details.js';
+
 export class AppError extends Error {
   constructor(
     readonly statusCode: number,
     readonly code: string,
     message: string,
-    readonly details: readonly unknown[] = []
+    readonly details: readonly PublicErrorDetail[] = []
   ) {
     super(message);
     this.name = new.target.name;
@@ -11,7 +13,7 @@ export class AppError extends Error {
 }
 
 export class ValidationError extends AppError {
-  constructor(message = 'Invalid request', details: readonly unknown[] = []) {
+  constructor(message = 'Invalid request', details: readonly PublicErrorDetail[] = []) {
     super(400, 'VALIDATION_ERROR', message, details);
   }
 }
