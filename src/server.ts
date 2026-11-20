@@ -12,6 +12,10 @@ import { createShutdownController, registerShutdownSignals } from './common/util
 import { ensureDashboardIndexes } from './config/dashboard-indexes.js';
 import { DashboardAnalyticsAdapter } from './modules/dashboard/dashboard.analytics-adapter.js';
 import { MongooseDashboardRepository } from './modules/dashboard/dashboard.repository.js';
+import { createQuestionRouter } from './modules/question/question.routes.js';
+import { createQuestionModel } from './modules/question/question.model.js';
+import { MongooseQuestionRepository } from './modules/question/question.repository.js';
+import { createAttemptExportSource } from './modules/question/question.attempt-adapter.js';
 import { createApp } from './app.js';
 
 async function main(): Promise<void> {
@@ -28,6 +32,7 @@ async function main(): Promise<void> {
     const database = connection;
     await ensureDashboardIndexes(database, env.ATTEMPT_COLLECTION);
     const readers = createMongoReaders(database, { users: env.USER_COLLECTION, quizzes: env.QUIZ_COLLECTION });
+    const questionModel = createQuestionModel(database);
     const auth = createAuth(new JwtVerifier(env.JWT_SECRET), readers.sessions);
     const errors = {
       notFound: (resource: string) => new NotFoundError(resource),
@@ -42,6 +47,11 @@ async function main(): Promise<void> {
         repository: new MongooseDashboardRepository({ connection: database, attemptCollection: env.ATTEMPT_COLLECTION, errors }),
         analytics: new DashboardAnalyticsAdapter(workers)
       },
+      moduleRouters: [createQuestionRouter(
+        new MongooseQuestionRepository({ connection: database, questions: questionModel, quizCollection: env.QUIZ_COLLECTION }),
+        auth,
+        createAttemptExportSource(database)
+      )],
       health: { dbReady: () => database.readyState === 1, workerReady: () => workers.isReady(), eventLoop: monitor, uptime: () => process.uptime() }
     });
     const server = createServer(app);
