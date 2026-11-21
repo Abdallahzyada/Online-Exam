@@ -122,6 +122,12 @@ function csvCell(value: unknown): string {
   else if (value instanceof Date) normalized = value.toISOString();
   else if (typeof value === 'object') normalized = JSON.stringify(value);
   else normalized = String(value);
+  // CSV formula injection protection (OWASP recommendation):
+  // Prefix cells whose first character is a spreadsheet formula starter with a tab so
+  // that applications like Excel and Google Sheets do not evaluate them as formulas.
+  if (normalized.length > 0 && '=+-@\t\r'.includes(normalized[0]!)) {
+    normalized = `\t${normalized}`;
+  }
   return /[",\r\n]/.test(normalized) ? `"${normalized.replaceAll('"', '""')}"` : normalized;
 }
 
@@ -164,6 +170,10 @@ export const QUESTION_EXPORT_COLUMNS = [
   '_id', 'quizId', 'type', 'text', 'options', 'correctOptionIds', 'points', 'createdAt', 'updatedAt'
 ] as const;
 
+// NOTE: quizTitle and quizImageUrl are not included because the attempt documents
+// do not embed those fields. Including them would require a cross-collection join
+// that is outside this module's responsibility. The Attempt module must embed these
+// fields in attempt documents before they can appear in exports.
 export const ATTEMPT_EXPORT_COLUMNS = [
   '_id', 'studentId', 'quizId', 'status', 'startedAt', 'expiresAt', 'submittedAt',
   'questionsCount', 'durationMinutes', 'correctCount', 'incorrectCount', 'earnedPoints',

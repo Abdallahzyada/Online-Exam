@@ -3,6 +3,7 @@ import { QuestionController } from './question.controller.js';
 import type { AttemptExportSource, QuestionAuth, QuestionRepository } from './question.ports.js';
 import { QuestionService } from './question.service.js';
 import { validateRequest } from '../../common/middlewares/validate-request.js';
+import { paginationSchema } from '../../common/utils/pagination.js';
 import {
   exportQuerySchema, questionParamsSchema, questionSchema, questionUpdateSchema, quizParamsSchema
 } from './question.dto.js';
@@ -17,7 +18,16 @@ export function createQuestionRouter(
   const validateQuizParams = validateRequest(quizParamsSchema, 'params', 'params');
   const validateQuestionParams = validateRequest(questionParamsSchema, 'params', 'params');
   const validateExportQuery = validateRequest(exportQuerySchema, 'query', 'query');
+  const validatePagination = validateRequest(paginationSchema, 'query', 'query');
 
+  router.get(
+    '/admin/quizzes/:quizId/questions', auth.authenticate, auth.requireAdmin,
+    validateQuizParams, validatePagination, controller.list
+  );
+  router.get(
+    '/admin/questions/:questionId', auth.authenticate, auth.requireAdmin,
+    validateQuestionParams, controller.get
+  );
   router.post(
     '/admin/quizzes/:quizId/questions', auth.authenticate, auth.requireAdmin,
     validateQuizParams, validateRequest(questionSchema, 'body', 'body'), controller.create

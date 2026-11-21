@@ -49,7 +49,10 @@ export const exportQuerySchema = z.object({
   compress: z.enum(['gzip']).optional()
 }).strict();
 
-export type QuestionInput = z.infer<typeof questionSchema>;
+/** Validated + defaulted output: points is always present (default=1 applied). Used by repository/service. */
+export type QuestionInput = z.output<typeof questionSchema>;
+/** Raw client input: points may be omitted (Zod will apply the default). Used in route body documentation. */
+export type QuestionRawInput = z.input<typeof questionSchema>;
 export type QuestionPatch = z.infer<typeof questionUpdateSchema>;
 export type QuestionType = QuestionInput['type'];
 export type QuestionOption = QuestionInput['options'][number];

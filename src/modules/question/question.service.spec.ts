@@ -26,6 +26,7 @@ function setup() {
   const repository: jest.Mocked<QuestionRepository> = {
     quizExists: jest.fn(async () => true),
     findById: jest.fn(async () => record),
+    findByQuiz: jest.fn(async () => ({ questions: [record], total: 1 })),
     create: jest.fn(async () => record),
     update: jest.fn(async () => record),
     delete: jest.fn(async () => true),
@@ -90,4 +91,38 @@ describe('QuestionService', () => {
     repository.quizExists.mockResolvedValue(false);
     await expect(service.questionExportCursor(quizId)).rejects.toBeInstanceOf(NotFoundError);
   });
+
+  it('returns paginated questions and total from listQuestions', async () => {
+    const { repository, service } = setup();
+    const result = await service.listQuestions(quizId, { page: 1, limit: 10 });
+    expect(repository.findByQuiz).toHaveBeenCalledWith(quizId, { page: 1, limit: 10 });
+    expect(result.total).toBe(1);
+    expect(result.page).toBe(1);
+    expect(result.limit).toBe(10);
+    expect(result.questions).toHaveLength(1);
+    // Returned items must be DTOs (id string, ISO dates) not raw records
+    expect(result.questions[0]).toMatchObject({ id: questionId, quizId, text: 'Question?' });
+    expect(typeof result.questions[0]!.createdAt).toBe('string');
+  });
+
+  it('throws NotFound from listQuestions when the quiz does not exist', async () => {
+    const { repository, service } = setup();
+    repository.quizExists.mockResolvedValue(false);
+    await expect(service.listQuestions(quizId, { page: 1, limit: 10 })).rejects.toBeInstanceOf(NotFoundError);
+    expect(repository.findByQuiz).not.toHaveBeenCalled();
+  });
+
+  it('returns a question DTO from getQuestion', async () => {
+    const { service } = setup();
+    const result = await service.getQuestion(questionId);
+    expect(result).toMatchObject({ id: questionId, quizId, text: 'Question?', points: 2 });
+    expect(typeof result.createdAt).toBe('string');
+  });
+
+  it('throws NotFound from getQuestion when the question does not exist', async () => {
+    const { repository, service } = setup();
+    repository.findById.mockResolvedValue(null);
+    await expect(service.getQuestion(questionId)).rejects.toBeInstanceOf(NotFoundError);
+  });
 });
+

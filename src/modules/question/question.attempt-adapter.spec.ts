@@ -10,7 +10,8 @@ describe('Attempt export adapter', () => {
     const cursor = Readable.from([{ _id: 'attempt' }]);
     const cursorMethod = jest.fn((_options: { batchSize: number }) => cursor);
     const lean = jest.fn(() => ({ cursor: cursorMethod }));
-    const sort = jest.fn((_order: Record<string, number>) => ({ lean }));
+    const maxTimeMS = jest.fn((_ms: number) => ({ lean }));
+    const sort = jest.fn((_order: Record<string, number>) => ({ maxTimeMS }));
     const find = jest.fn((_filter: Record<string, unknown>) => ({ sort }));
     const model = { find } as unknown as Model<Record<string, unknown>>;
     const connection = { models: { QuizAttempt: model } } as unknown as Connection;
@@ -18,6 +19,7 @@ describe('Attempt export adapter', () => {
     expect(source.findByQuizCursor('aaaaaaaaaaaaaaaaaaaaaaaa')).toBe(cursor);
     expect(find).toHaveBeenCalledWith({ quizId: new Types.ObjectId('aaaaaaaaaaaaaaaaaaaaaaaa') });
     expect(sort).toHaveBeenCalledWith({ _id: 1 });
+    expect(maxTimeMS).toHaveBeenCalledWith(30_000);
     expect(cursorMethod).toHaveBeenCalledWith({ batchSize: 100 });
   });
 

@@ -13,16 +13,20 @@ export interface StreamExportOptions {
 }
 
 export async function streamCursorToResponse(
-  req: Request,
+  _req: Request,
   res: Response,
   cursor: Readable,
   options: StreamExportOptions
 ): Promise<void> {
   const abortController = new AbortController();
-  const onRequestClosed = () => { if (!req.complete) abortController.abort(); };
-  const onResponseClosed = () => { if (!res.writableEnded) abortController.abort(); };
 
-  req.once('close', onRequestClosed);
+  // For streaming exports the outgoing response (res) is what matters for client-disconnect
+  // detection. The incoming request (req) for GET endpoints has no body — req.complete is
+  // true immediately, so listening to req.close would never fire correctly. We therefore
+  // listen only to res.close, which fires both on normal completion and on premature disconnect.
+  // The writableEnded guard distinguishes the two cases: if the response was already ended
+  // normally, writableEnded is true and we do NOT abort (this is not a disconnect).
+  const onResponseClosed = () => { if (!res.writableEnded) abortController.abort(); };
   res.once('close', onResponseClosed);
 
   const extension = options.format === 'csv' ? 'csv' : 'ndjson';
@@ -48,7 +52,6 @@ export async function streamCursorToResponse(
   } catch (error: unknown) {
     if (!abortController.signal.aborted) throw error;
   } finally {
-    req.off('close', onRequestClosed);
     res.off('close', onResponseClosed);
     if (!cursor.destroyed) cursor.destroy();
   }

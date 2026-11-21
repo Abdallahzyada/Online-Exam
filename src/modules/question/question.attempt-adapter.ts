@@ -13,7 +13,7 @@ export function createAttemptExportSource(connection: Connection): AttemptExport
       const attemptModel = connection.models.QuizAttempt as Model<Record<string, unknown>> | undefined;
       if (!attemptModel) throw new ServiceUnavailableError('Attempt export is not available until the Attempt module is registered');
       return attemptModel.find({ quizId: new Types.ObjectId(quizId) })
-        .sort({ _id: 1 }).lean().cursor({ batchSize: 100 });
+        .sort({ _id: 1 }).maxTimeMS(30_000).lean().cursor({ batchSize: 100 });
     }
   };
 }

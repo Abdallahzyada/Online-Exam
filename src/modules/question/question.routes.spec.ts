@@ -24,6 +24,7 @@ function setup() {
   const repository: jest.Mocked<QuestionRepository> = {
     quizExists: jest.fn(async () => true),
     findById: jest.fn(async () => document),
+    findByQuiz: jest.fn(async () => ({ questions: [document], total: 1 })),
     create: jest.fn(async () => document),
     update: jest.fn(async () => document),
     delete: jest.fn(async () => true),
@@ -152,4 +153,104 @@ describe('Question HTTP routes', () => {
       .set('Authorization', 'Bearer admin');
     expect(response.status).toBe(404);
   });
+
+  it('lists questions for a quiz with a paginated envelope', async () => {
+    const { app, repository } = setup();
+    const response = await request(app).get(`/api/v1/admin/quizzes/${quizId}/questions`)
+      .set('Authorization', 'Bearer admin');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      data: [expect.objectContaining({ id: questionId, quizId, text: 'What is 2 + 2?' })],
+      meta: { total: 1, page: 1, limit: 10 }
+    });
+    expect(repository.findByQuiz).toHaveBeenCalledWith(quizId, { page: 1, limit: 10 });
+  });
+
+  it('applies pagination parameters to the question list', async () => {
+    const { app, repository } = setup();
+    const response = await request(app).get(`/api/v1/admin/quizzes/${quizId}/questions?page=2&limit=5`)
+      .set('Authorization', 'Bearer admin');
+    expect(response.status).toBe(200);
+    expect(repository.findByQuiz).toHaveBeenCalledWith(quizId, { page: 2, limit: 5 });
+  });
+
+  it('requires auth for the question list endpoint', async () => {
+    const { app } = setup();
+    const noAuth = await request(app).get(`/api/v1/admin/quizzes/${quizId}/questions`);
+    expect(noAuth.status).toBe(401);
+    const student = await request(app).get(`/api/v1/admin/quizzes/${quizId}/questions`)
+      .set('Authorization', 'Bearer student');
+    expect(student.status).toBe(403);
+  });
+
+  it('returns a single question by ID', async () => {
+    const { app, repository } = setup();
+    const response = await request(app).get(`/api/v1/admin/questions/${questionId}`)
+      .set('Authorization', 'Bearer admin');
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ success: true, data: { id: questionId, quizId } });
+    expect(repository.findById).toHaveBeenCalledWith(questionId);
+  });
+
+  it('returns 404 for a non-existent question', async () => {
+    const { app, repository } = setup();
+    repository.findById.mockResolvedValue(null);
+    const response = await request(app).get(`/api/v1/admin/questions/${questionId}`)
+      .set('Authorization', 'Bearer admin');
+    expect(response.status).toBe(404);
+  });
+
+  it('rejects an import whose Content-Length header exceeds 100 MB', async () => {
+    const { app } = setup();
+    const response = await request(app)
+      .post(`/api/v1/admin/quizzes/${quizId}/questions/import`)
+      .set('Authorization', 'Bearer admin')
+      .set('Content-Type', 'application/x-ndjson')
+      .set('Content-Length', String(101 * 1024 * 1024))
+      .send('');
+    expect(response.status).toBe(413);
+    expect(response.body.error.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
+  it('calls insertMany with the correct document payload and ordered:true option', async () => {
+    const { app, repository } = setup();
+    const ndjson = JSON.stringify(body);
+    await request(app).post(`/api/v1/admin/quizzes/${quizId}/questions/import`)
+      .set('Authorization', 'Bearer admin').set('Content-Type', 'application/x-ndjson').send(ndjson);
+    expect(repository.insertMany).toHaveBeenCalledTimes(1);
+    // The batch passed to insertMany must include the validated question fields
+    const [calledQuizId, batch] = repository.insertMany.mock.calls[0]!;
+    expect(calledQuizId).toBe(quizId);
+    expect(batch[0]).toMatchObject({ type: 'single', text: 'What is 2 + 2?', points: 1 });
+  });
+
+  it('produces CSV with the canonical QUESTION_EXPORT_COLUMNS ordering', async () => {
+    const { app } = setup();
+    const response = await request(app)
+      .get(`/api/v1/admin/quizzes/${quizId}/questions/export?format=csv`)
+      .set('Authorization', 'Bearer admin');
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('text/csv');
+    // Header row must follow QUESTION_EXPORT_COLUMNS order
+    const firstLine = response.text.split('\r\n')[0];
+    expect(firstLine).toBe('_id,quizId,type,text,options,correctOptionIds,points,createdAt,updatedAt');
+    // Data row must contain the question text
+    expect(response.text).toContain('What is 2 + 2?');
+  });
+
+  it('gzip-compressed NDJSON export decompresses to correct content', async () => {
+    const { app } = setup();
+    const response = await request(app)
+      .get(`/api/v1/admin/quizzes/${quizId}/questions/export?format=ndjson&compress=gzip`)
+      .set('Authorization', 'Bearer admin');
+    expect(response.status).toBe(200);
+    expect(response.headers['content-encoding']).toBe('gzip');
+    // supertest automatically decompresses gzip; response.text is already plain NDJSON
+    expect(response.text).toContain('What is 2 + 2?');
+    // Must be valid NDJSON — the first line parses cleanly
+    const parsed = JSON.parse(response.text.trim()) as Record<string, unknown>;
+    expect(parsed['text']).toBe('What is 2 + 2?');
+  });
 });
+

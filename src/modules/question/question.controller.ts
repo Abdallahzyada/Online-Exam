@@ -1,12 +1,16 @@
 import type { NextFunction, Request, Response } from 'express';
 import { AppError } from '../../common/errors/app-error.js';
 import { asyncHandler } from '../../common/middlewares/async-handler.js';
-import { success } from '../../common/utils/response-envelope.js';
+import { success, paginated } from '../../common/utils/response-envelope.js';
 import type { AttemptExportSource } from './question.ports.js';
 import { QuestionService } from './question.service.js';
 import { streamCursorToResponse } from './question.export.js';
 import { ATTEMPT_EXPORT_COLUMNS, QUESTION_EXPORT_COLUMNS } from './question.streams.js';
 import type { QuestionInput, QuestionPatch } from './question.dto.js';
+import type { Pagination } from '../../common/utils/pagination.js';
+
+/** Maximum raw body size accepted for NDJSON imports (checked via Content-Length header). */
+export const QUESTION_IMPORT_MAX_CONTENT_BYTES = 100 * 1024 * 1024; // 100 MB
 
 interface Params { readonly quizId?: string; readonly questionId?: string }
 interface ExportQuery { readonly format: 'ndjson' | 'csv'; readonly compress?: 'gzip' }
@@ -16,6 +20,19 @@ export class QuestionController {
     private readonly service: QuestionService,
     private readonly attempts?: AttemptExportSource
   ) {}
+
+  readonly list = asyncHandler(async (_req, res) => {
+    const params = res.locals.params as Params;
+    const query = res.locals.query as Pagination;
+    const result = await this.service.listQuestions(params.quizId ?? '', query);
+    res.status(200).json(paginated(result.questions, { total: result.total, page: result.page, limit: result.limit }));
+  });
+
+  readonly get = asyncHandler(async (_req, res) => {
+    const params = res.locals.params as Params;
+    const question = await this.service.getQuestion(params.questionId ?? '');
+    res.status(200).json(success(question));
+  });
 
   readonly create = asyncHandler(async (_req, res) => {
     const params = res.locals.params as Params;
@@ -42,6 +59,12 @@ export class QuestionController {
     const contentType = (req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase();
     if (contentType !== 'application/x-ndjson' && contentType !== 'application/ndjson') {
       throw new AppError(415, 'REQUEST_ERROR', 'Use application/x-ndjson for question imports');
+    }
+    // Reject uploads that declare a body larger than the allowed maximum before we start streaming.
+    // The in-stream guards (line size + line count) remain active as a defence-in-depth measure.
+    const contentLength = parseInt(req.headers['content-length'] ?? '', 10);
+    if (!isNaN(contentLength) && contentLength > QUESTION_IMPORT_MAX_CONTENT_BYTES) {
+      throw new AppError(413, 'PAYLOAD_TOO_LARGE', 'Import file exceeds the 100 MB limit');
     }
     const report = await this.service.importQuestions(params.quizId ?? '', req);
     res.status(200).json(success(report));

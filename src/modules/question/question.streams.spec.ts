@@ -68,6 +68,62 @@ describe('NDJSON question import', () => {
   it('rejects invalid batch sizes', async () => {
     await expect(importNdjsonQuestions(Readable.from([]), async batch => batch.length, 0)).rejects.toThrow(RangeError);
   });
+
+  it('succeeds across multiple batches without MongoDB transactions', async () => {
+    // Three complete batches of batchSize=2 plus a remainder of 1
+    const lines = Array.from({ length: 7 }, (_, i) => JSON.stringify(question(i))).join('\n');
+    const batchCalls: number[] = [];
+    const report = await importNdjsonQuestions(Readable.from([lines]), async batch => {
+      batchCalls.push(batch.length);
+      return batch.length;
+    }, 2);
+    expect(report.importedCount).toBe(7);
+    expect(report.skippedCount).toBe(0);
+    expect(batchCalls).toEqual([2, 2, 2, 1]);
+  });
+
+  it('reports importedCount from successful batches only when a later batch fails', async () => {
+    // 3 valid questions with batchSize=1 → batch 1 succeeds, batch 2 fails, batch 3 never runs
+    const lines = Array.from({ length: 3 }, (_, i) => JSON.stringify(question(i))).join('\n');
+    let call = 0;
+    const insertBatch = jest.fn(async (batch: readonly unknown[]) => {
+      call += 1;
+      if (call === 2) throw new Error('DB write error on batch 2');
+      return batch.length;
+    });
+    await expect(
+      importNdjsonQuestions(Readable.from([lines]), insertBatch, 1)
+    ).rejects.toThrow('DB write error on batch 2');
+    // Only the first batch succeeded
+    expect(insertBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not count a failed DB insert as a skipped/validation line', async () => {
+    // A batch insert DB failure must propagate as a thrown error, not as a skipped line,
+    // so the caller can distinguish real insertion failures from invalid-data skips.
+    const line = JSON.stringify(question(1));
+    const dbError = new Error('Network timeout');
+    await expect(
+      importNdjsonQuestions(Readable.from([line]), async () => { throw dbError; }, 1)
+    ).rejects.toThrow('Network timeout');
+  });
+
+  it('destroys the stream and cleans up readline on a mid-stream error', async () => {
+    const source = Readable.from([
+      JSON.stringify(question(1)) + '\n',
+      JSON.stringify(question(2)) + '\n'
+    ]);
+    const destroyed: boolean[] = [];
+    source.on('close', () => destroyed.push(source.destroyed));
+    const dbError = new Error('Disk full');
+    await expect(
+      importNdjsonQuestions(source, async () => { throw dbError; }, 1)
+    ).rejects.toThrow('Disk full');
+    // Source stream must have been cleaned up (destroyed via lineGuard chain)
+    expect(source.destroyed).toBe(true);
+  });
+
+
 });
 
 describe('stream export formatter', () => {
@@ -90,5 +146,39 @@ describe('stream export formatter', () => {
     const output = await collect(Readable.from([{ _id: '1', quizId: '2', snapshot: [{ text: 'Q' }] }]), 'csv');
     expect(output).toContain('_id,quizId,snapshot\r\n');
     expect(output).toContain('"[{""text"":""Q""}]"');
+  });
+});
+
+describe('CSV formula injection protection', () => {
+  it('prefixes dangerous formula starters with a tab character', async () => {
+    const rows = [{ a: '=SUM(A1:A2)', b: '+cmd|/C calc', c: '-1+2', d: '@SUM(A1)' }];
+    const output = await collect(Readable.from(rows), 'csv', ['a', 'b', 'c', 'd']);
+    expect(output).toContain('\t=SUM(A1:A2)');
+    expect(output).toContain('\t+cmd|/C calc');
+    expect(output).toContain('\t-1+2');
+    expect(output).toContain('\t@SUM(A1)');
+  });
+
+  it('leaves safe values and empty cells untouched', async () => {
+    const output = await collect(Readable.from([{ text: 'Hello World', empty: '' }]), 'csv', ['text', 'empty']);
+    expect(output).toContain('Hello World');
+    expect(output).not.toContain('\tHello World');
+    expect(output).toContain(',\r\n');
+  });
+
+  it('applies protection to multi-row exports consistently', async () => {
+    const rows = [{ text: 'safe' }, { text: '=EVIL()' }, { text: 'also safe' }];
+    const output = await collect(Readable.from(rows), 'csv', ['text']);
+    const lines = output.split('\r\n').filter(Boolean);
+    expect(lines[0]).toBe('text');
+    expect(lines[1]).toBe('safe');
+    expect(lines[2]).toBe('\t=EVIL()');
+    expect(lines[3]).toBe('also safe');
+  });
+
+  it('sanitizes numeric-like strings that start with a minus or plus sign', async () => {
+    const output = await collect(Readable.from([{ v: '-1+2' }, { v: '+99' }]), 'csv', ['v']);
+    expect(output).toContain('\t-1+2');
+    expect(output).toContain('\t+99');
   });
 });

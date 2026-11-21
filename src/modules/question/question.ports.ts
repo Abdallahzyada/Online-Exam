@@ -1,11 +1,13 @@
 import type { RequestHandler } from 'express';
 import type { Readable } from 'node:stream';
+import type { Pagination } from '../../common/utils/pagination.js';
 import type { QuestionInput, QuestionPatch } from './question.dto.js';
 import type { QuestionRecord } from './question.model.js';
 
 export interface QuestionRepository {
   quizExists(quizId: string): Promise<boolean>;
   findById(questionId: string): Promise<QuestionRecord | null>;
+  findByQuiz(quizId: string, pagination: Pagination): Promise<{ questions: QuestionRecord[]; total: number }>;
   create(quizId: string, input: QuestionInput): Promise<QuestionRecord>;
   update(questionId: string, patch: QuestionPatch): Promise<QuestionRecord | null>;
   delete(questionId: string): Promise<boolean>;

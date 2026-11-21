@@ -1,6 +1,7 @@
 import { NotFoundError } from '../../common/errors/app-error.js';
 import type { QuestionInput, QuestionPatch } from './question.dto.js';
 import { toQuestionDto } from './question.dto.js';
+import type { Pagination } from '../../common/utils/pagination.js';
 import type { QuestionRepository, ImportReport } from './question.ports.js';
 import { importNdjsonQuestions } from './question.streams.js';
 import type { Readable } from 'node:stream';
@@ -22,6 +23,18 @@ export class QuestionService {
     const deleted = await this.repository.delete(questionId);
     if (!deleted) throw new NotFoundError('Question');
     return { questionId, deleted: true };
+  }
+
+  async listQuestions(quizId: string, pagination: Pagination) {
+    if (!await this.repository.quizExists(quizId)) throw new NotFoundError('Quiz');
+    const { questions, total } = await this.repository.findByQuiz(quizId, pagination);
+    return { questions: questions.map(toQuestionDto), total, page: pagination.page, limit: pagination.limit };
+  }
+
+  async getQuestion(questionId: string) {
+    const question = await this.repository.findById(questionId);
+    if (!question) throw new NotFoundError('Question');
+    return toQuestionDto(question);
   }
 
   async importQuestions(quizId: string, source: Readable): Promise<ImportReport> {
