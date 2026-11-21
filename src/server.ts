@@ -14,6 +14,7 @@ import { DashboardAnalyticsAdapter } from './modules/dashboard/dashboard.analyti
 import { MongooseDashboardRepository } from './modules/dashboard/dashboard.repository.js';
 import { createCatalogRouter } from './modules/catalog/catalog.routes.js';
 import { createApp } from './app.js';
+// import { createAuthRouter } from './modules/auth/auth.routes.js';
 
 async function main(): Promise<void> {
   const env = parseEnvironment(process.env);
