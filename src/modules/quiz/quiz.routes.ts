@@ -1,64 +1,48 @@
 import { Router } from "express";
 import type { DashboardAuth } from "../dashboard/dashboard.ports.js";
 import { validateRequest } from "../../common/middlewares/validate-request.js";
-import {
-  createQuizSchema,
-  diplomaQuizzesSchema,
-  publishQuizSchema,
-  quizIdSchema,
-  updateQuizSchema,
-} from "./quiz.dto.js";
-import * as controller from "./quiz.controller.js";
+import { quizIdSchema, updateQuizSchema } from "./quiz.dto.js";
+import type { QuizController } from "./quiz.controller.js";
 
-export function createQuizRouter(auth: Pick<DashboardAuth, "authenticate" | "requireAdmin">) {
+type CatalogAuth = Pick<DashboardAuth, "authenticate" | "requireAdmin">;
+
+/** Mounted at /api/v1/quizzes — instructions modal for an authenticated user. */
+export function createQuizRouter(auth: CatalogAuth, controller: QuizController) {
   const router = Router();
 
-  router.use(auth.authenticate);
-
-  router.get(
-    "/diploma/:diplomaId",
-    validateRequest(diplomaQuizzesSchema.shape.params, "params"),
-    validateRequest(diplomaQuizzesSchema.shape.query, "query"),
-    controller.listDiplomaQuizzes,
-  );
   router.get(
     "/:quizId",
+    auth.authenticate,
     validateRequest(quizIdSchema.shape.params, "params"),
     controller.getQuizInstructions,
   );
 
-  router.post(
-    "/diploma/:diplomaId",
-    auth.requireAdmin,
-    validateRequest(createQuizSchema.shape.params, "params"),
-    validateRequest(createQuizSchema.shape.body, "body"),
-    controller.createQuiz,
+  return router;
+}
+
+/** Mounted at /api/v1/admin/quizzes — admin only (analytics/questions routes live in other modules). */
+export function createAdminQuizRouter(auth: CatalogAuth, controller: QuizController) {
+  const router = Router();
+  const adminOnly = [auth.authenticate, auth.requireAdmin];
+
+  router.get(
+    "/:quizId",
+    ...adminOnly,
+    validateRequest(quizIdSchema.shape.params, "params"),
+    controller.getQuizAdmin,
   );
   router.patch(
     "/:quizId",
-    auth.requireAdmin,
+    ...adminOnly,
     validateRequest(updateQuizSchema.shape.params, "params"),
     validateRequest(updateQuizSchema.shape.body, "body"),
     controller.updateQuiz,
   );
-  router.patch(
-    "/:quizId/publish",
-    auth.requireAdmin,
-    validateRequest(publishQuizSchema.shape.params, "params"),
-    validateRequest(publishQuizSchema.shape.body, "body"),
-    controller.publishQuiz,
-  );
   router.delete(
     "/:quizId",
-    auth.requireAdmin,
+    ...adminOnly,
     validateRequest(quizIdSchema.shape.params, "params"),
     controller.archiveQuiz,
-  );
-  router.get(
-    "/:quizId/admin",
-    auth.requireAdmin,
-    validateRequest(quizIdSchema.shape.params, "params"),
-    controller.getQuizAdmin,
   );
 
   return router;

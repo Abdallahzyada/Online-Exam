@@ -49,11 +49,9 @@ export class DiplomaRepository {
     return { items, total };
   }
 
-  async incrementQuizCount(id: string, amount: number) {
-    return DiplomaModel.updateOne(
-      { _id: id },
-      { $inc: { quizzesCount: amount } },
-    );
+  /** Atomic counter change for the number of published quizzes. */
+  incrementQuizCount(id: string, amount: number) {
+    return DiplomaModel.updateOne({ _id: id }, { $inc: { quizzesCount: amount } });
   }
 }
 
