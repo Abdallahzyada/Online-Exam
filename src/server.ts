@@ -12,6 +12,7 @@ import { createShutdownController, registerShutdownSignals } from './common/util
 import { ensureDashboardIndexes } from './config/dashboard-indexes.js';
 import { DashboardAnalyticsAdapter } from './modules/dashboard/dashboard.analytics-adapter.js';
 import { MongooseDashboardRepository } from './modules/dashboard/dashboard.repository.js';
+import { createCatalogRouter } from './modules/catalog/catalog.routes.js';
 import { createApp } from './app.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 
@@ -36,53 +37,55 @@ async function main(): Promise<void> {
     };
     workers.start();
     monitor.start();
-    const app = createApp({
-  auth,
-  trustProxy: env.TRUST_PROXY,
-  reportError: report,
-  corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
-
-  moduleRouters: [
-    createAuthRouter({
-      connection: database,
-      collectionName: env.USER_COLLECTION,
+        const app = createApp({
       auth,
-      jwtSecret: env.JWT_SECRET,
-      jwtExpiresIn: env.JWT_EXPIRES_IN,
-      otpExpiresMinutes: env.OTP_EXPIRES_MINUTES,
+      trustProxy: env.TRUST_PROXY,
       reportError: report,
+      corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
 
-      emailSender: {
-        async sendPasswordResetCode(email, code) {
-          if (env.NODE_ENV === 'production') {
-            throw new Error('Production email sender is not configured');
+      moduleRouters: [
+        createCatalogRouter(auth),
+        createAuthRouter({
+          connection: database,
+          collectionName: env.USER_COLLECTION,
+          auth,
+          jwtSecret: env.JWT_SECRET,
+          jwtExpiresIn: env.JWT_EXPIRES_IN,
+          otpExpiresMinutes: env.OTP_EXPIRES_MINUTES,
+          reportError: report,
+
+          emailSender: {
+            async sendPasswordResetCode(email, code) {
+              if (env.NODE_ENV === 'production') {
+                throw new Error('Production email sender is not configured');
+              }
+
+              console.info(`[DEV ONLY] Password reset code for ${email}: ${code}`);
+            }
           }
+        })
+      ],
 
-          console.info(`[DEV ONLY] Password reset code for ${email}: ${code}`);
-        }
+      dashboard: {
+        profiles: readers.profiles,
+        quizzes: readers.quizzes,
+        errors,
+        repository: new MongooseDashboardRepository({
+          connection: database,
+          attemptCollection: env.ATTEMPT_COLLECTION,
+          errors
+        }),
+        analytics: new DashboardAnalyticsAdapter(workers)
+      },
+
+      health: {
+        dbReady: () => database.readyState === 1,
+        workerReady: () => workers.isReady(),
+        eventLoop: monitor,
+        uptime: () => process.uptime()
       }
-    })
-  ],
+    });
 
-  dashboard: {
-    profiles: readers.profiles,
-    quizzes: readers.quizzes,
-    errors,
-    repository: new MongooseDashboardRepository({
-      connection: database,
-      attemptCollection: env.ATTEMPT_COLLECTION,
-      errors
-    }),
-    analytics: new DashboardAnalyticsAdapter(workers)
-  },
-
-  health: {
-    dbReady: () => database.readyState === 1,
-    workerReady: () => workers.isReady(),
-    eventLoop: monitor,
-    uptime: () => process.uptime()
-  }
-});
     const server = createServer(app);
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
