@@ -89,14 +89,19 @@ The default request timeout is 30 seconds. The worker protocol currently registe
 This is the one shared manager: modules should not create their own Worker.
 
 Health reports event-loop delays in milliseconds, database status, and worker
-readiness. Monitoring starts at bootstrap, not on each request. Measurements are
-since process startup. SIGINT and SIGTERM stop HTTP admission and drain active
+readiness. Monitoring starts at bootstrap, not on each request. The delay values
+cover the last complete 5-second window, so health shows current lag instead of
+an average since startup; before the first window ends they cover the time since
+start. SIGINT and SIGTERM stop HTTP admission and drain active
 requests while workers and MongoDB remain available, then stop workers, close
 MongoDB and stop monitoring. Repeated signals use the same guarded shutdown.
 An unref'ed 10-second safety deadline remains armed even after cleanup fails;
 it does not keep a clean process alive.
-Successful cleanup clears the deadline. A later server error still changes the
-exit code to failure even if shutdown has already started.
+Successful cleanup clears the deadline and exits explicitly with the final code,
+so a timer or socket left open by any module cannot keep the process running
+after cleanup. A server error during shutdown still changes the exit code to failure.
+An uncaught exception (including an unhandled promise rejection) is reported and
+runs the same graceful shutdown, then exits with code 1.
 
 The API JSON limit is 100 KB. NDJSON streaming imports use a different content
 type and are not consumed by the JSON parser. The global limit is 300 requests

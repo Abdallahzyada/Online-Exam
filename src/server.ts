@@ -8,7 +8,7 @@ import { AppError, NotFoundError } from './common/errors/app-error.js';
 import { WorkerManager } from './common/workers/worker-manager.js';
 import { EventLoopMonitor } from './common/telemetry/event-loop-monitor.js';
 import { createShutdown } from './common/utils/shutdown.js';
-import { createShutdownController, registerShutdownSignals } from './common/utils/shutdown-controller.js';
+import { createShutdownController, registerFatalErrorHandler, registerShutdownSignals } from './common/utils/shutdown-controller.js';
 import { ensureDashboardIndexes } from './config/dashboard-indexes.js';
 import { DashboardAnalyticsAdapter } from './modules/dashboard/dashboard.analytics-adapter.js';
 import { MongooseDashboardRepository } from './modules/dashboard/dashboard.repository.js';
@@ -17,7 +17,6 @@ import { createApp } from './app.js';
 async function main(): Promise<void> {
   const env = parseEnvironment(process.env);
   const report = (error: unknown) => {
-    // Do not log tokens, request bodies, or database connection strings.
     console.error(error instanceof AppError ? error.code : 'Unexpected runtime failure');
   };
   let connection: Connection | undefined;
@@ -60,10 +59,15 @@ async function main(): Promise<void> {
     });
     const stop = createShutdownController({
       shutdown, report,
+      exit: code => process.exit(code),
       forceExit: () => { server.closeAllConnections(); process.exit(1); },
       setExitCode: code => { process.exitCode = code; }
     });
     registerShutdownSignals(process, () => stop());
+    registerFatalErrorHandler(process, error => {
+      console.error('Uncaught exception. Shutting down gracefully.');
+      report(error);
+    }, code => stop(code));
     server.on('error', error => { report(error); stop(1); });
   } catch (error: unknown) {
     await workers.close();
@@ -74,7 +78,6 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error: unknown) => {
-  // Environment validation messages contain field names, never their values.
   const message = error instanceof Error && error.message.startsWith('Invalid environment:')
     ? error.message : 'Server could not start. Check database access and configuration.';
   console.error(message);

@@ -4,7 +4,6 @@ export const MAX_QUESTION_RESULTS = 100_000;
 export const MAX_CONCURRENT_ANALYTICS = 2;
 export const MAX_PENDING_QUESTION_RESULTS = MAX_QUESTION_RESULTS * MAX_CONCURRENT_ANALYTICS;
 
-// Preflight before Zod or postMessage clones nested arrays.
 export function questionResultCount(payload: unknown): number | null {
   if (typeof payload !== 'object' || payload === null || !('attempts' in payload) || !Array.isArray(payload.attempts)) return null;
   if (payload.attempts.length > MAX_ANALYTICS_ATTEMPTS) return null;
