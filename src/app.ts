@@ -7,13 +7,8 @@ import { createErrorHandler } from './common/middlewares/global-error-handler.js
 import { NotFoundError } from './common/errors/app-error.js';
 import { createHealthRouter } from './common/telemetry/health.routes.js';
 import type { HealthDependencies } from './common/telemetry/health.routes.js';
-import { createDashboardRouter } from './modules/dashboard/dashboard.routes.js';
-import type { DashboardDependencies } from './modules/dashboard/dashboard.service.js';
-import type { DashboardAuth } from './modules/dashboard/dashboard.ports.js';
 
 export interface ApplicationDependencies {
-  readonly dashboard: DashboardDependencies;
-  readonly auth: DashboardAuth;
   readonly health: HealthDependencies;
   readonly corsOrigins: readonly string[];
   readonly reportError: (error: unknown) => void;
@@ -36,7 +31,6 @@ export function createApp(dependencies: ApplicationDependencies) {
   }));
   app.use(express.json({ limit: '100kb' }));
   for (const router of dependencies.moduleRouters ?? []) app.use('/api/v1', router);
-  app.use('/api/v1', createDashboardRouter(dependencies.dashboard, dependencies.auth));
   app.use((_req, _res, next) => next(new NotFoundError('Route')));
   app.use(createErrorHandler(dependencies.reportError));
   return app;

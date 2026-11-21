@@ -6,7 +6,7 @@ module.exports = {
   clearMocks: true, restoreMocks: true,
   collectCoverageFrom: [
     'src/**/*.ts', '!src/**/*.spec.ts', '!src/**/testing/**', '!src/**/*.dto.ts', '!src/**/*.ports.ts',
-    '!src/server.ts', '!src/config/database.ts', '!src/common/workers/analytics.worker.ts',
+    '!src/server.ts', '!src/bootstrap.ts', '!src/modules/registry.ts',
     '!src/common/workers/worker-protocol.ts', '!src/common/utils/email-sender.ts'
   ],
   coverageThreshold: { global: { branches: 80, functions: 85, lines: 85, statements: 85 } }
