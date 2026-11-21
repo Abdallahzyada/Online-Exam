@@ -1,6 +1,8 @@
 const messages = {
   VALIDATION_ERROR: 'Invalid request', UNAUTHORIZED: 'Authentication required',
   FORBIDDEN: 'Access denied', NOT_FOUND: 'Resource not found', CONFLICT: 'Resource conflict',
+  REQUEST_ERROR: 'Request could not be completed',
+  PAYLOAD_TOO_LARGE: 'Request body is too large',
   ANALYTICS_LIMIT: 'Quiz exceeds the supported analytics size',
   SERVICE_UNAVAILABLE: 'Service temporarily unavailable', WORKER_TIMEOUT: 'Service temporarily unavailable',
   INTERNAL_ERROR: 'Service temporarily unavailable', WORKER_FAILED: 'Service temporarily unavailable',
