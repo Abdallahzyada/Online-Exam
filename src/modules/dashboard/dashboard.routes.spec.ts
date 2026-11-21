@@ -19,7 +19,8 @@ function makeApp() {
   const auth: DashboardAuth = {
     authenticate: (req, _res, next) => next(req.header('x-test-role') ? undefined : new TestHttpError(401, 'UNAUTHORIZED')),
     requireStudent: requireRole('student'), requireAdmin: requireRole('admin'),
-    studentId: (_request: Request) => studentId
+    studentId: (_request: Request) => studentId,
+    principal: (req: Request) => ({ role: req.header('x-test-role') === 'admin' ? 'admin' as const : 'student' as const })
   };
   const app = express();
   app.use('/api/v1', createDashboardRouter(dependencies, auth));
