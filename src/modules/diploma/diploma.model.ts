@@ -6,12 +6,14 @@ const diplomaSchema = new Schema(
     description: { type: String, required: true, trim: true, maxlength: 2000 },
     imageUrl: { type: String, required: true, trim: true },
     isActive: { type: Boolean, default: true, index: true },
+    // Number of PUBLISHED quizzes (what a student can actually open).
     quizzesCount: { type: Number, default: 0, min: 0 }
   },
   { timestamps: true, versionKey: false }
 );
 
-diplomaSchema.index({ title: 1 }, { unique: true });
+// Case-insensitive uniqueness, so "HTML" and "html" cannot both exist (matches the service check).
+diplomaSchema.index({ title: 1 }, { unique: true, collation: { locale: "en", strength: 2 } });
 diplomaSchema.index({ isActive: 1, createdAt: -1 });
 
 export type DiplomaDocument = InferSchemaType<typeof diplomaSchema>;

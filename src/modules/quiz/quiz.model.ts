@@ -17,13 +17,20 @@ const quizSchema = new Schema(
     passingScorePercentage: { type: Number, default: 50, min: 0, max: 100 },
     totalPoints: { type: Number, default: 0, min: 0 },
     instructions: { type: [String], default: [] },
-    isPublished: { type: Boolean, default: false, index: true }
+    isPublished: { type: Boolean, default: false, index: true },
+    // Soft delete: history and attempt snapshots keep pointing at the quiz (BR-06).
+    isArchived: { type: Boolean, default: false }
   },
   { timestamps: true, versionKey: false }
 );
 
 quizSchema.index({ diplomaId: 1, isPublished: 1, createdAt: -1 });
 quizSchema.index({ title: "text", description: "text" });
+// A title is unique inside one diploma (case-insensitive); archived quizzes free their title.
+quizSchema.index(
+  { diplomaId: 1, title: 1 },
+  { unique: true, collation: { locale: "en", strength: 2 }, partialFilterExpression: { isArchived: false } }
+);
 
 export type QuizDocument = InferSchemaType<typeof quizSchema>;
 export const QuizModel = model("Quiz", quizSchema);
