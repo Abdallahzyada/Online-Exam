@@ -55,11 +55,13 @@ describe('Attempt HTTP routes', () => {
   it('returns 409 on double submit and the review after submission', async () => {
     const { app } = makeApp();
     const attemptId = await start(app);
-    expect((await request(app).get(`/api/v1/attempts/${attemptId}/review`).set('x-test-role', 'student')).status).toBe(403);
+    const early = await request(app).get(`/api/v1/attempts/${attemptId}/review`).set('x-test-role', 'student');
+    expect(early.status).toBe(403);
+    expect(early.body.error).toMatchObject({ code: 'ATTEMPT_NOT_SUBMITTED', message: 'The attempt has not been submitted yet' });
     await request(app).post(`/api/v1/attempts/${attemptId}/submit`).set('x-test-role', 'student').send({ answers });
     const again = await request(app).post(`/api/v1/attempts/${attemptId}/submit`).set('x-test-role', 'student').send({ answers });
     expect(again.status).toBe(409);
-    expect(again.body.success).toBe(false);
+    expect(again.body).toMatchObject({ success: false, error: { code: 'ATTEMPT_ALREADY_SUBMITTED' } });
     const review = await request(app).get(`/api/v1/attempts/${attemptId}/review`).set('x-test-role', 'student');
     expect(review.status).toBe(200);
     expect(review.body.data.questions[0]).toMatchObject({ correctOptionIds: ['opt_a'], isCorrect: true });

@@ -162,6 +162,79 @@ try {
   });
   const emptyAnalytics = await http('/admin/quizzes/' + emptyQuiz + '/analytics', adminToken);
   checked('Empty quiz analytics succeeds', () => { assert.equal(emptyAnalytics.status, 200); assert.deepEqual(emptyAnalytics.body.data.latency, { p50: null, p90: null }); });
+
+  // Attempts through the real server: shared JWT auth, router wiring, public error codes.
+  const attemptStudent = id(106), attemptQuiz = id(207), archivedQuiz = id(208);
+  const qa = id(310), qb = id(311);
+  await users.insertOne({ _id: attemptStudent, firstName: 'Attempt', lastName: 'Student', role: 'student', tokenVersion: 0 });
+  await quizzes.insertMany([
+    { _id: attemptQuiz, title: 'Attempt Quiz', imageUrl: 'https://example.com/a.png', durationMinutes: 15, passingScorePercentage: 50, isPublished: true, isArchived: false },
+    { _id: archivedQuiz, title: 'Archived Quiz', imageUrl: 'https://example.com/b.png', durationMinutes: 15, isPublished: true, isArchived: true }
+  ]);
+  await connection.collection('questions').insertMany([
+    { _id: qa, quizId: attemptQuiz, type: 'single', text: 'x'.repeat(10_000), points: 1, correctOptionIds: ['o0'],
+      options: Array.from({ length: 100 }, (_, index) => ({ optionId: 'o' + index, text: 'Option ' + index })) },
+    { _id: qb, quizId: attemptQuiz, type: 'multi', text: 'Pick A and C', points: 1, correctOptionIds: ['a', 'c'],
+      options: [{ optionId: 'a', text: 'A' }, { optionId: 'b', text: 'B' }, { optionId: 'c', text: 'C' }] }
+  ]);
+  const send = async (method, path, token, body) => {
+    const response = await fetch(base + path, {
+      method, headers: { Authorization: 'Bearer ' + token, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(35_000)
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const attemptToken = await accessToken(attemptStudent);
+  const startedAttempt = await send('POST', '/quizzes/' + attemptQuiz + '/attempts', attemptToken);
+  checked('Attempt starts through the real server with Question Bank-sized questions and no answer key', () => {
+    assert.equal(startedAttempt.status, 201);
+    assert.equal(startedAttempt.body.data.questions.length, 2);
+    assert.equal(startedAttempt.body.data.questions[0].options.length, 100);
+    assert.ok(!JSON.stringify(startedAttempt.body).includes('correctOptionIds'));
+  });
+  const attemptPath = '/attempts/' + startedAttempt.body.data.attemptId;
+  const notSubmitted = await send('GET', attemptPath + '/review', attemptToken);
+  checked('Review before submit returns 403 ATTEMPT_NOT_SUBMITTED', () => {
+    assert.equal(notSubmitted.status, 403);
+    assert.equal(notSubmitted.body.error.code, 'ATTEMPT_NOT_SUBMITTED');
+  });
+  const attemptAnswers = { answers: [{ questionId: qa.toHexString(), selectedOptionIds: ['o0'] }, { questionId: qb.toHexString(), selectedOptionIds: ['c', 'a'] }] };
+  const submits = await Promise.all([1, 2, 3].map(() => send('POST', attemptPath + '/submit', attemptToken, attemptAnswers)));
+  checked('Parallel submits score once; the others get 409 ATTEMPT_ALREADY_SUBMITTED', () => {
+    assert.deepEqual(submits.map(response => response.status).sort(), [200, 409, 409]);
+    assert.ok(submits.filter(response => response.status === 409).every(response => response.body.error.code === 'ATTEMPT_ALREADY_SUBMITTED'));
+    assert.equal(submits.find(response => response.status === 200).body.data.scorePercentage, 100);
+  });
+  const attemptReview = await send('GET', attemptPath + '/review', attemptToken);
+  checked('Review after submit returns the answer diff', () => {
+    assert.equal(attemptReview.status, 200);
+    assert.deepEqual(attemptReview.body.data.questions[1].correctOptionIds, ['a', 'c']);
+    assert.equal(attemptReview.body.data.questions[1].isCorrect, true);
+  });
+  const foreignReview = await send('GET', attemptPath + '/review', await accessToken(otherStudent));
+  const adminStart = await send('POST', '/quizzes/' + attemptQuiz + '/attempts', adminToken);
+  const archivedStart = await send('POST', '/quizzes/' + archivedQuiz + '/attempts', attemptToken);
+  checked('Attempts hide other students and archived quizzes (404) and reject admins (403)', () => {
+    assert.equal(foreignReview.status, 404);
+    assert.equal(archivedStart.status, 404);
+    assert.equal(adminStart.status, 403);
+  });
+  const lateAttempt = await send('POST', '/quizzes/' + attemptQuiz + '/attempts', attemptToken);
+  await attempts.updateOne({ _id: new mongoose.Types.ObjectId(lateAttempt.body.data.attemptId) },
+    { $set: { startedAt: new Date(Date.now() - 16 * 60_000), expiresAt: new Date(Date.now() - 60_000) } });
+  const late = await send('POST', '/attempts/' + lateAttempt.body.data.attemptId + '/submit', attemptToken, attemptAnswers);
+  checked('A submit past the grace window returns 400 ATTEMPT_EXPIRED', () => {
+    assert.equal(late.status, 400);
+    assert.equal(late.body.error.code, 'ATTEMPT_EXPIRED');
+  });
+  const attemptHistory = await http('/dashboard/history', attemptToken);
+  checked('Dashboard history reads attempts created through the Attempts API', () => {
+    assert.equal(attemptHistory.status, 200);
+    assert.deepEqual(attemptHistory.body.data.map(entry => entry.passed).sort(), [false, true]);
+  });
+  const attemptIndexes = await attempts.listIndexes().toArray();
+  checked('Attempt expiry index is provisioned at startup', () => assert.ok(attemptIndexes.some(index => index.name === 'attempt_expiry_sweep')));
+
   const authCases = [
     ['/dashboard/me', undefined, 401],
     ['/admin/quizzes/' + quiz + '/analytics', studentToken, 403],

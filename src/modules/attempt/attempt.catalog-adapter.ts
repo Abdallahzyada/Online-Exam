@@ -14,7 +14,9 @@ const storedQuizSchema = z.object({
   imageUrl: z.string().nullish(),
   durationMinutes: z.number(),
   passingScorePercentage: z.number().min(0).max(100).default(DEFAULT_PASSING_SCORE_PERCENTAGE),
-  isPublished: z.boolean().default(false)
+  isPublished: z.boolean().default(false),
+  // Catalog soft-deletes quizzes; an archived quiz is hidden like an unpublished one.
+  isArchived: z.boolean().default(false)
 });
 
 export interface AttemptCatalogCollections {
@@ -30,12 +32,13 @@ export function createAttemptCatalogReaders(connection: Connection, collections:
       async findQuiz(quizId) {
         const document = await connection.collection(collections.quizzes).findOne(
           { _id: new Types.ObjectId(quizId) },
-          { projection: { title: 1, imageUrl: 1, durationMinutes: 1, passingScorePercentage: 1, isPublished: 1 }, timeoutMS: DATABASE_DEADLINE_MS }
+          { projection: { title: 1, imageUrl: 1, durationMinutes: 1, passingScorePercentage: 1, isPublished: 1, isArchived: 1 }, timeoutMS: DATABASE_DEADLINE_MS }
         );
         if (!document) return null;
         const parsed = storedQuizSchema.safeParse(document);
         if (!parsed.success) throw new Error('Stored quiz does not match the attempt contract');
-        return { quizId, ...parsed.data, imageUrl: parsed.data.imageUrl ?? null };
+        const { isArchived, isPublished, imageUrl, ...quiz } = parsed.data;
+        return { quizId, ...quiz, imageUrl: imageUrl ?? null, isPublished: isPublished && !isArchived };
       }
     },
     questions: {

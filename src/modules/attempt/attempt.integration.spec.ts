@@ -26,7 +26,7 @@ const suite = live ? describe : describe.skip;
 
 const oid = () => new Types.ObjectId();
 const student = oid(), otherStudent = oid();
-const quiz = oid(), draftQuiz = oid(), emptyQuiz = oid(), brokenQuiz = oid();
+const quiz = oid(), draftQuiz = oid(), emptyQuiz = oid(), brokenQuiz = oid(), archivedQuiz = oid(), largeQuiz = oid();
 const qSingle = oid(), qMulti = oid(), qBroken = oid();
 
 suite('Attempts against live MongoDB', () => {
@@ -43,7 +43,9 @@ suite('Attempts against live MongoDB', () => {
       { _id: quiz, title: 'Live Quiz', imageUrl: 'https://example.com/q.png', durationMinutes: 15, passingScorePercentage: 50, isPublished: true },
       { _id: draftQuiz, title: 'Draft', durationMinutes: 15, isPublished: false },
       { _id: emptyQuiz, title: 'Empty', durationMinutes: 15, isPublished: true },
-      { _id: brokenQuiz, title: 'Broken', durationMinutes: 15, isPublished: true }
+      { _id: brokenQuiz, title: 'Broken', durationMinutes: 15, isPublished: true },
+      { _id: archivedQuiz, title: 'Archived', durationMinutes: 15, isPublished: true, isArchived: true },
+      { _id: largeQuiz, title: 'Largest allowed', durationMinutes: 15, isPublished: true, isArchived: false }
     ]);
     await connection.collection('questions').insertMany([
       { _id: qSingle, quizId: quiz, type: 'single', text: 'Pick A', points: 2,
@@ -51,7 +53,11 @@ suite('Attempts against live MongoDB', () => {
       { _id: qMulti, quizId: quiz, type: 'multi', text: 'Pick A and C',
         options: [{ optionId: 'opt_a', text: 'A' }, { optionId: 'opt_b', text: 'B' }, { optionId: 'opt_c', text: 'C' }], correctOptionIds: ['opt_a', 'opt_c'] },
       { _id: qBroken, quizId: brokenQuiz, type: 'single', text: 'Bad key',
-        options: [{ optionId: 'opt_a', text: 'A' }, { optionId: 'opt_b', text: 'B' }], correctOptionIds: ['opt_a', 'opt_b'] }
+        options: [{ optionId: 'opt_a', text: 'A' }, { optionId: 'opt_b', text: 'B' }], correctOptionIds: ['opt_a', 'opt_b'] },
+      // The largest question the Question Bank DTO accepts must still be snapshotted.
+      { _id: oid(), quizId: largeQuiz, type: 'multi', text: 'q'.repeat(10_000), points: 1_000_000,
+        options: Array.from({ length: 100 }, (_, index) => ({ optionId: `o${index}`.padEnd(64, 'x'), text: 't'.repeat(2_000) })),
+        correctOptionIds: Array.from({ length: 100 }, (_, index) => `o${index}`.padEnd(64, 'x')) }
     ]);
     attempts = createAttemptModule({
       connection, report, now: () => clock.now,
@@ -129,6 +135,14 @@ suite('Attempts against live MongoDB', () => {
     expect((await request(app).post(`/api/v1/quizzes/${draftQuiz.toHexString()}/attempts`).set(as(student))).status).toBe(404);
     expect((await request(app).post(`/api/v1/quizzes/${oid().toHexString()}/attempts`).set(as(student))).status).toBe(404);
     expect((await request(app).post(`/api/v1/quizzes/${emptyQuiz.toHexString()}/attempts`).set(as(student))).status).toBe(409);
+    expect((await request(app).post(`/api/v1/quizzes/${archivedQuiz.toHexString()}/attempts`).set(as(student))).status).toBe(404);
+  });
+
+  it('snapshots the largest question the Question Bank accepts (10,000 chars, 100 options)', async () => {
+    const response = await request(app).post(`/api/v1/quizzes/${largeQuiz.toHexString()}/attempts`).set(as(otherStudent));
+    expect(response.status).toBe(201);
+    expect(response.body.data.questions[0].options).toHaveLength(100);
+    expect(response.body.data.questions[0].text).toHaveLength(10_000);
   });
 
   it('rejects a stored question that breaks the answer-key rules (BR-08) with a safe 500', async () => {

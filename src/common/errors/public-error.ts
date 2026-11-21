@@ -5,7 +5,10 @@ const messages = {
   SERVICE_UNAVAILABLE: 'Service temporarily unavailable', WORKER_TIMEOUT: 'Service temporarily unavailable',
   INTERNAL_ERROR: 'Service temporarily unavailable', WORKER_FAILED: 'Service temporarily unavailable',
   WORKER_EXITED: 'Service temporarily unavailable', WORKER_PROTOCOL_ERROR: 'Service temporarily unavailable',
-  ANALYTICS_FAILED: 'Service temporarily unavailable'
+  ANALYTICS_FAILED: 'Service temporarily unavailable',
+  ATTEMPT_EXPIRED: 'The attempt time limit has passed',
+  ATTEMPT_ALREADY_SUBMITTED: 'The attempt has already been submitted',
+  ATTEMPT_NOT_SUBMITTED: 'The attempt has not been submitted yet'
 } as const;
 
 export function publicError(code: string, status: number): { code: string; message: string } {

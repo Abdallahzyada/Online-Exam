@@ -13,6 +13,8 @@ import { ensureDashboardIndexes } from './config/dashboard-indexes.js';
 import { DashboardAnalyticsAdapter } from './modules/dashboard/dashboard.analytics-adapter.js';
 import { MongooseDashboardRepository } from './modules/dashboard/dashboard.repository.js';
 import { createCatalogRouter } from './modules/catalog/catalog.routes.js';
+import { createAttemptModule } from './modules/attempt/attempt.module.js';
+import type { AttemptModule } from './modules/attempt/attempt.module.js';
 import { createApp } from './app.js';
 
 async function main(): Promise<void> {
@@ -22,6 +24,7 @@ async function main(): Promise<void> {
     console.error(error instanceof AppError ? error.code : 'Unexpected runtime failure');
   };
   let connection: Connection | undefined;
+  let attempts: AttemptModule | undefined;
   const monitor = new EventLoopMonitor();
   const workers = new WorkerManager({ timeoutMs: env.WORKER_TIMEOUT_MS, maxPending: env.WORKER_MAX_PENDING, report });
   try {
@@ -30,6 +33,11 @@ async function main(): Promise<void> {
     await ensureDashboardIndexes(database, env.ATTEMPT_COLLECTION);
     const readers = createMongoReaders(database, { users: env.USER_COLLECTION, quizzes: env.QUIZ_COLLECTION });
     const auth = createAuth(new JwtVerifier(env.JWT_SECRET), readers.sessions);
+    attempts = createAttemptModule({
+      connection: database, auth, report,
+      collections: { attempts: env.ATTEMPT_COLLECTION, quizzes: env.QUIZ_COLLECTION }
+    });
+    await attempts.ensureIndexes();
     const errors = {
       notFound: (resource: string) => new NotFoundError(resource),
       analyticsLimit: () => new AppError(422, 'ANALYTICS_LIMIT', 'Quiz exceeds the supported analytics size')
@@ -38,7 +46,7 @@ async function main(): Promise<void> {
     monitor.start();
     const app = createApp({
       auth, trustProxy: env.TRUST_PROXY, reportError: report, corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
-      moduleRouters: [createCatalogRouter(auth)],
+      moduleRouters: [createCatalogRouter(auth), attempts.router],
       dashboard: {
         profiles: readers.profiles, quizzes: readers.quizzes, errors,
         repository: new MongooseDashboardRepository({ connection: database, attemptCollection: env.ATTEMPT_COLLECTION, errors }),
@@ -52,12 +60,16 @@ async function main(): Promise<void> {
       server.listen(env.PORT, () => { server.off('error', reject); resolve(); });
     });
     console.log(`Server listening on port ${env.PORT}`);
+    attempts.startBackgroundJobs();
+    const attemptModule = attempts;
     const shutdown = createShutdown({
       stopHttp: () => new Promise<void>((resolve, reject) => {
         server.close(error => error ? reject(error) : resolve());
         server.closeIdleConnections();
       }),
-      stopWorkers: () => workers.close(), closeDatabase: () => disconnectDatabase(database),
+      // The attempt expiry job finishes its current sweep before MongoDB closes.
+      stopWorkers: async () => { await attemptModule.stop(); await workers.close(); },
+      closeDatabase: () => disconnectDatabase(database),
       stopMonitor: () => monitor.stop()
     });
     const stop = createShutdownController({
@@ -68,6 +80,7 @@ async function main(): Promise<void> {
     registerShutdownSignals(process, () => stop());
     server.on('error', error => { report(error); stop(1); });
   } catch (error: unknown) {
+    await attempts?.stop();
     await workers.close();
     monitor.stop();
     if (connection) await disconnectDatabase(connection);
