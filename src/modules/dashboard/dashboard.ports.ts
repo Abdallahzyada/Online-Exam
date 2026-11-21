@@ -32,6 +32,7 @@ export interface DashboardAuth {
   readonly requireStudent: RequestHandler;
   readonly requireAdmin: RequestHandler;
   studentId(request: Request): string;
+  principal(request: Request): { readonly role: 'student' | 'admin' };
 }
 export interface SharedWorkerPort {
   withCapacity<T>(work: () => Promise<T>): Promise<T>;

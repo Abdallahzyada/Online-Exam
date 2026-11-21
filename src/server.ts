@@ -12,6 +12,7 @@ import { createShutdownController, registerFatalErrorHandler, registerShutdownSi
 import { ensureDashboardIndexes } from './config/dashboard-indexes.js';
 import { DashboardAnalyticsAdapter } from './modules/dashboard/dashboard.analytics-adapter.js';
 import { MongooseDashboardRepository } from './modules/dashboard/dashboard.repository.js';
+import { createCatalogRouter } from './modules/catalog/catalog.routes.js';
 import { createApp } from './app.js';
 
 async function main(): Promise<void> {
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
     monitor.start();
     const app = createApp({
       auth, trustProxy: env.TRUST_PROXY, reportError: report, corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
+      moduleRouters: [createCatalogRouter(auth)],
       dashboard: {
         profiles: readers.profiles, quizzes: readers.quizzes, errors,
         repository: new MongooseDashboardRepository({ connection: database, attemptCollection: env.ATTEMPT_COLLECTION, errors }),
