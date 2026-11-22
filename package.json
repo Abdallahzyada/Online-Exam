@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "setup:env": "node scripts/setup-env.mjs",
+    "db:local": "node scripts/start-local-mongodb.mjs",
     "start": "node --env-file-if-exists=.env dist/server.js",
     "dev": "npm run build && npm start",
     "build": "tsc -p tsconfig.build.json",

@@ -122,7 +122,36 @@ in CORS_ORIGINS. Health is public and outside the API rate limit.
 
 ## Verification
 
-Run `npm run verify` with local MongoDB available at 127.0.0.1:27017.
+### Local MongoDB setup
+
+Question create, update and delete use MongoDB transactions. They need a replica
+set; a standalone server returns HTTP 500 for these operations.
+
+Install MongoDB Community Server, then run:
+
+```text
+npm ci
+npm run setup:env
+npm run db:local -- --write-env
+npm run dev
+```
+
+The database command starts a separate single-node replica set on localhost port
+27018. It uses the installed `mongod` (automatically found on Windows), or the
+executable set in `MONGOD_PATH`. On other systems, put `mongod` on PATH.
+Run `npm run db:local` again after restarting the computer. If port 27018 is used
+by another database, choose `npm run db:local -- --port=27019 --write-env`.
+It never converts the server on port 27017 or copies its data. The new database
+starts empty. `--write-env` changes only `MONGO_URI`; omit it to keep the existing
+connection. Existing Atlas or other replica-set connections can be used directly.
+Private settings, database files and logs stay ignored by Git. This local server
+binds only to localhost and is for development, not production.
+
+This follows the [MongoDB development replica-set setup](https://www.mongodb.com/docs/manual/tutorial/deploy-replica-set-for-testing/).
+
+Run `npm run verify` after starting the local replica set on port 27018.
+For another test server, set `TEST_MONGO_URI` to its connection string.
+The checks replace only the database name with a unique temporary name.
 This runs Jest coverage, builds the project, checks real worker failures and
 recovery, fixture-lock checks, then live integration scenarios through the server and MongoDB.
 A unique temporary test database is removed after the integration run.
