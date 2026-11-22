@@ -96,6 +96,27 @@ describe('uncaught exceptions', () => {
     expect(exit).toHaveBeenCalledWith(1);
     expect(setExitCode).not.toHaveBeenCalledWith(0);
   });
+  it('sets exit code 1 as soon as fatal shutdown starts, even if cleanup never finishes', async () => {
+    jest.useFakeTimers();
+    const source = new EventEmitter();
+    const exit = jest.fn(), forceExit = jest.fn(), setExitCode = jest.fn();
+    const stop = createShutdownController({
+      shutdown: () => new Promise<void>(() => {}), exit, forceExit, report: jest.fn(), setExitCode, deadlineMs: 100
+    });
+    registerFatalErrorHandler(source, jest.fn(), code => stop(code));
+    source.emit('uncaughtException', new Error('crash'));
+    expect(setExitCode).toHaveBeenCalledWith(1);
+    await jest.advanceTimersByTimeAsync(50);
+    expect(exit).not.toHaveBeenCalled();
+    expect(setExitCode).not.toHaveBeenCalledWith(0);
+    await jest.advanceTimersByTimeAsync(50);
+    expect(forceExit).toHaveBeenCalledTimes(1);
+  });
+  it('does not set an exit code early for a normal signal shutdown', () => {
+    const setExitCode = jest.fn();
+    createShutdownController({ shutdown: () => new Promise<void>(() => {}), exit: jest.fn(), forceExit: jest.fn(), report: jest.fn(), setExitCode })();
+    expect(setExitCode).not.toHaveBeenCalled();
+  });
   it('removes its listener when unregistered', () => {
     const source = new EventEmitter();
     const unregister = registerFatalErrorHandler(source, jest.fn(), jest.fn());

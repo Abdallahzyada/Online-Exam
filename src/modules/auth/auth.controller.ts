@@ -106,11 +106,14 @@ export class AuthController {
 
       if (!dto) throw new Error('OTP validation middleware is missing');
 
-      await this.service.verifyResetCode(dto);
+      const result = await this.service.verifyResetCode(dto);
 
-      res.status(200).json(
-        success({ message: 'Code verified successfully' })
-      );
+res.status(200).json(
+  success({
+    message: 'Code verified successfully',
+    resetToken: result.resetToken
+  })
+);
     } catch (error: unknown) {
       next(error);
     }

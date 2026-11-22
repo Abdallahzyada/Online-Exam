@@ -1,4 +1,5 @@
 
+import { createHmac } from 'node:crypto';
 import { Types } from 'mongoose';
 import bcrypt from 'bcrypt';
 import { jwtVerify } from 'jose';
@@ -19,6 +20,17 @@ import {
 } from '../../common/errors/app-error.js';
 
 const JWT_SECRET = 'test-secret-that-is-at-least-thirty-two-characters';
+const AUTH_TOKEN_SECRET =
+  'test-auth-token-secret-that-is-at-least-thirty-two-characters';
+
+function hashResetValue(
+  value: string,
+  purpose: 'otp' | 'reset'
+): string {
+  return createHmac('sha256', AUTH_TOKEN_SECRET)
+    .update(`${purpose}:${value}`)
+    .digest('hex');
+}
 const OTP_EXPIRY_MINUTES = 10;
 
 function makeUser(overrides: Partial<UserRecord> = {}): UserDocument {
@@ -75,9 +87,9 @@ const emailSender: AuthEmailSender = {
       storeResetOtp: jest.fn(),
       findResetOtp: jest.fn(),
       recordFailedOtpAttempt: jest.fn(),
-      markResetOtpVerified: jest.fn(),
       clearResetOtp: jest.fn(),
-      resetPasswordWithOtp: jest.fn()
+issuePasswordResetToken: jest.fn(),
+resetPasswordWithToken: jest.fn()
     } as unknown as jest.Mocked<AuthRepository>;
 
    sendPasswordResetCode.mockClear();
@@ -87,6 +99,7 @@ sendPasswordResetCode.mockResolvedValue(undefined);
     service = new AuthService(repository, {
       jwtSecret: JWT_SECRET,
       jwtExpiresIn: '15m',
+      authTokenSecret: AUTH_TOKEN_SECRET,
       otpExpiresMinutes: OTP_EXPIRY_MINUTES,
       emailSender,
       reportError
@@ -335,173 +348,189 @@ sendPasswordResetCode.mockResolvedValue(undefined);
   });
 
   describe('verifyResetCode', () => {
-    it('should reject an unknown or missing OTP', async () => {
-      repository.findResetOtp.mockResolvedValue(null);
+  it('should reject an unknown or missing OTP', async () => {
+    repository.findResetOtp.mockResolvedValue(null);
 
-      await expect(
-        service.verifyResetCode({
-          email: 'ayman@example.com',
-          code: '123456'
-        })
-      ).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(
+      service.verifyResetCode({
+        email: 'ayman@example.com',
+        code: '123456'
+      })
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+
+    expect(repository.issuePasswordResetToken).not.toHaveBeenCalled();
+  });
+
+  it('should reject an expired OTP', async () => {
+    repository.findResetOtp.mockResolvedValue({
+      hash: hashResetValue('123456', 'otp'),
+      expiresAt: new Date(Date.now() - 60_000),
+      attempts: 0
     });
 
-    it('should reject an expired OTP', async () => {
-      repository.findResetOtp.mockResolvedValue({
-        hash: 'some-hash',
-        expiresAt: new Date(Date.now() - 60_000),
-        attempts: 0,
-        verifiedAt: null
-      });
+    await expect(
+      service.verifyResetCode({
+        email: 'ayman@example.com',
+        code: '123456'
+      })
+    ).rejects.toBeInstanceOf(UnauthorizedError);
 
-      await expect(
-        service.verifyResetCode({
-          email: 'ayman@example.com',
-          code: '123456'
-        })
-      ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(repository.issuePasswordResetToken).not.toHaveBeenCalled();
+  });
+
+  it('should reject OTP verification after the maximum attempts', async () => {
+    repository.findResetOtp.mockResolvedValue({
+      hash: hashResetValue('123456', 'otp'),
+      expiresAt: new Date(Date.now() + 60_000),
+      attempts: 5
     });
 
-    it('should reject OTP verification after the maximum attempts', async () => {
-      repository.findResetOtp.mockResolvedValue({
-        hash: 'some-hash',
-        expiresAt: new Date(Date.now() + 60_000),
-        attempts: 5,
-        verifiedAt: null
-      });
+    await expect(
+      service.verifyResetCode({
+        email: 'ayman@example.com',
+        code: '123456'
+      })
+    ).rejects.toBeInstanceOf(UnauthorizedError);
 
-      await expect(
-        service.verifyResetCode({
-          email: 'ayman@example.com',
-          code: '123456'
-        })
-      ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(repository.issuePasswordResetToken).not.toHaveBeenCalled();
+  });
+
+  it('should reject an incorrect OTP and record a failed attempt', async () => {
+    const storedHash = hashResetValue('654321', 'otp');
+
+    repository.findResetOtp.mockResolvedValue({
+      hash: storedHash,
+      expiresAt: new Date(Date.now() + 60_000),
+      attempts: 0
     });
 
-    it('should reject an incorrect OTP and record a failed attempt', async () => {
-      repository.findResetOtp.mockResolvedValue({
-        hash: '0'.repeat(64),
-        expiresAt: new Date(Date.now() + 60_000),
-        attempts: 0,
-        verifiedAt: null
-      });
+    repository.recordFailedOtpAttempt.mockResolvedValue(1);
 
-      repository.recordFailedOtpAttempt.mockResolvedValue(1);
+    await expect(
+      service.verifyResetCode({
+        email: 'ayman@example.com',
+        code: '123456'
+      })
+    ).rejects.toBeInstanceOf(UnauthorizedError);
 
-      await expect(
-        service.verifyResetCode({
-          email: 'ayman@example.com',
-          code: '123456'
-        })
-      ).rejects.toBeInstanceOf(UnauthorizedError);
+    expect(repository.recordFailedOtpAttempt).toHaveBeenCalledWith(
+      'ayman@example.com',
+      storedHash,
+      5
+    );
 
-      expect(repository.recordFailedOtpAttempt).toHaveBeenCalledWith(
-        'ayman@example.com',
-        '0'.repeat(64),
-        5
-      );
+    expect(repository.issuePasswordResetToken).not.toHaveBeenCalled();
+  });
+
+  it('should issue a reset token after successful OTP verification', async () => {
+    const code = '123456';
+    const storedHash = hashResetValue(code, 'otp');
+
+    repository.findResetOtp.mockResolvedValue({
+      hash: storedHash,
+      expiresAt: new Date(Date.now() + 60_000),
+      attempts: 0
     });
 
-    it('should mark a valid OTP as verified', async () => {
-      const code = '123456';
-      const { createHash } = await import('node:crypto');
+    repository.issuePasswordResetToken.mockResolvedValue(true);
 
-      const hash = createHash('sha256').update(code).digest('hex');
+    const result = await service.verifyResetCode({
+      email: 'ayman@example.com',
+      code
+    });
 
-      repository.findResetOtp.mockResolvedValue({
-        hash,
-        expiresAt: new Date(Date.now() + 60_000),
-        attempts: 0,
-        verifiedAt: null
-      });
+    expect(result.resetToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
-      repository.markResetOtpVerified.mockResolvedValue(true);
+    const expectedResetTokenHash = hashResetValue(
+      result.resetToken,
+      'reset'
+    );
 
-      await service.verifyResetCode({
+    expect(repository.issuePasswordResetToken).toHaveBeenCalledWith(
+      'ayman@example.com',
+      storedHash,
+      expectedResetTokenHash,
+      expect.any(Date),
+      expect.any(Date),
+      5
+    );
+  });
+
+  it('should reject if the OTP was invalidated before token issuance', async () => {
+    const code = '123456';
+
+    repository.findResetOtp.mockResolvedValue({
+      hash: hashResetValue(code, 'otp'),
+      expiresAt: new Date(Date.now() + 60_000),
+      attempts: 0
+    });
+
+    repository.issuePasswordResetToken.mockResolvedValue(false);
+
+    await expect(
+      service.verifyResetCode({
         email: 'ayman@example.com',
         code
-      });
-
-      expect(repository.markResetOtpVerified).toHaveBeenCalledWith(
-        'ayman@example.com',
-        hash,
-        expect.any(Date),
-        5
-      );
-    });
-
-    it('should reject if the OTP was invalidated before verification completed', async () => {
-      const { createHash } = await import('node:crypto');
-      const code = '123456';
-
-      const hash = createHash('sha256').update(code).digest('hex');
-
-      repository.findResetOtp.mockResolvedValue({
-        hash,
-        expiresAt: new Date(Date.now() + 60_000),
-        attempts: 0,
-        verifiedAt: null
-      });
-
-      repository.markResetOtpVerified.mockResolvedValue(false);
-
-      await expect(
-        service.verifyResetCode({
-          email: 'ayman@example.com',
-          code
-        })
-      ).rejects.toBeInstanceOf(UnauthorizedError);
-    });
+      })
+    ).rejects.toBeInstanceOf(UnauthorizedError);
   });
+});
 
   describe('resetPassword', () => {
-    const dto: ResetPasswordDTO = {
-      email: 'ayman@example.com',
-      newPassword: 'NewStrongPass123!',
-      confirmPassword: 'NewStrongPass123!'
-    };
+  const dto: ResetPasswordDTO = {
+    email: 'ayman@example.com',
+    newPassword: 'NewStrongPass123!',
+    confirmPassword: 'NewStrongPass123!',
+    resetToken: 'A'.repeat(43)
+  };
 
-    it('should reject password reset before OTP verification', async () => {
-      repository.resetPasswordWithOtp.mockResolvedValue(false);
+  it('should reject an invalid or expired reset token', async () => {
+    repository.resetPasswordWithToken.mockResolvedValue(false);
 
-      await expect(
-        service.resetPassword(dto)
-      ).rejects.toBeInstanceOf(UnauthorizedError);
-    });
+    await expect(
+      service.resetPassword(dto)
+    ).rejects.toBeInstanceOf(UnauthorizedError);
 
-    it('should update the password when the OTP was verified', async () => {
-      repository.resetPasswordWithOtp.mockImplementation(
-        async (_email, passwordHash) => {
-          expect(
-            await bcrypt.compare(dto.newPassword, passwordHash)
-          ).toBe(true);
-
-          return true;
-        }
-      );
-
-      await service.resetPassword(dto);
-
-      expect(repository.resetPasswordWithOtp).toHaveBeenCalledWith(
-        dto.email,
-        expect.any(String),
-        expect.any(Date)
-      );
-    });
-
-    it('should not allow the same verified OTP to be reused', async () => {
-      // The repository's atomic update must consume the verified OTP.
-      repository.resetPasswordWithOtp
-        .mockResolvedValueOnce(true)
-        .mockResolvedValueOnce(false);
-
-      await service.resetPassword(dto);
-
-      await expect(
-        service.resetPassword(dto)
-      ).rejects.toBeInstanceOf(UnauthorizedError);
-
-      expect(repository.resetPasswordWithOtp).toHaveBeenCalledTimes(2);
-    });
+    expect(repository.resetPasswordWithToken).toHaveBeenCalledWith(
+      dto.email,
+      hashResetValue(dto.resetToken, 'reset'),
+      expect.any(String),
+      expect.any(Date)
+    );
   });
+
+  it('should update the password using a valid reset token', async () => {
+    repository.resetPasswordWithToken.mockImplementation(
+      async (_email, resetTokenHash, passwordHash) => {
+        expect(resetTokenHash).toBe(
+          hashResetValue(dto.resetToken, 'reset')
+        );
+
+        expect(
+          await bcrypt.compare(dto.newPassword, passwordHash)
+        ).toBe(true);
+
+        return true;
+      }
+    );
+
+    await service.resetPassword(dto);
+
+    expect(repository.resetPasswordWithToken).toHaveBeenCalledTimes(1);
+  });
+
+  it('should not allow the same reset token to be reused', async () => {
+    repository.resetPasswordWithToken
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    await service.resetPassword(dto);
+
+    await expect(
+      service.resetPassword(dto)
+    ).rejects.toBeInstanceOf(UnauthorizedError);
+
+    expect(repository.resetPasswordWithToken).toHaveBeenCalledTimes(2);
+  });
+});
 });

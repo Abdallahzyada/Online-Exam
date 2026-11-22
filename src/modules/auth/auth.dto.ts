@@ -11,6 +11,10 @@ const passwordSchema = z
   .string()
   .min(8, 'Password must contain at least 8 characters')
   .max(128, 'Password is too long')
+  .refine(
+    (password) => Buffer.byteLength(password, 'utf8') <= 72,
+    'Password must not exceed 72 UTF-8 bytes'
+  )
   .regex(
     /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).+$/,
     'Password must contain uppercase, lowercase, numeric, and special characters'
@@ -33,7 +37,14 @@ export const registerSchema = z
 
 export const loginSchema = z.object({
   email: emailSchema,
-  password: z.string().min(1).max(128)
+  password: z
+    .string()
+    .min(1)
+    .max(128)
+    .refine(
+      (password) => Buffer.byteLength(password, 'utf8') <= 72,
+      'Invalid credentials'
+    )
 });
 
 export const forgotPasswordSchema = z.object({
@@ -48,6 +59,7 @@ export const verifyResetCodeSchema = z.object({
 export const resetPasswordSchema = z
   .object({
     email: emailSchema,
+    resetToken: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
     newPassword: passwordSchema,
     confirmPassword: z.string()
   })

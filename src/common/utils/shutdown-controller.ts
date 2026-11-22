@@ -13,7 +13,10 @@ export function createShutdownController(options: ShutdownControllerOptions) {
   let finalExitCode = 0;
   return (exitCode = 0): void => {
     if (exitCode !== 0) finalExitCode = exitCode;
-    if (closing) { options.setExitCode(finalExitCode); return; }
+    // Publish a failure code before waiting: if cleanup hangs and nothing else keeps
+    // the event loop alive, Node exits on its own before the unref'ed deadline fires.
+    if (closing || finalExitCode !== 0) options.setExitCode(finalExitCode);
+    if (closing) return;
     closing = true;
     // Keep the deadline for failed or hanging cleanup only.
     const deadline = setTimeout(() => options.forceExit(), options.deadlineMs ?? 10_000);

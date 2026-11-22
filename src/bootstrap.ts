@@ -6,20 +6,29 @@ import { createMongoReaders } from './config/dashboard-adapters.js';
 import { createAuth, JwtVerifier } from './common/middlewares/auth-jwt.js';
 import { WorkerManager } from './common/workers/worker-manager.js';
 import { EventLoopMonitor } from './common/telemetry/event-loop-monitor.js';
-import { ShutdownStack } from './common/utils/shutdown.js';
+import { SmtpEmailSender } from './common/utils/smtp-email-sender.js';
+import type { ShutdownStack } from './common/utils/shutdown.js';
 import { createFeatureModules } from './modules/registry.js';
 import { createApp } from './app.js';
 
-export interface RunningApplication {
-  readonly server: Server;
-  stop(): Promise<void>;
-}
-
-export async function startApplication(env: Environment, report: (error: unknown) => void): Promise<RunningApplication> {
-  const shutdown = new ShutdownStack();
+/**
+ * Opens shared resources, wires every feature module and starts listening.
+ * Each resource registers its cleanup on `shutdown` as soon as it opens, so the
+ * stack closes them newest-first: HTTP, module jobs, monitor, worker, MongoDB.
+ * The caller owns `shutdown` and can run it while startup is still in progress.
+ */
+export async function startApplication(
+  env: Environment, report: (error: unknown) => void, shutdown: ShutdownStack
+): Promise<Server> {
   try {
     const connection = await connectDatabase(env.MONGO_URI, env.NODE_ENV === 'production');
     shutdown.add(() => disconnectDatabase(connection));
+
+    const emailSender = new SmtpEmailSender({
+      host: env.SMTP_HOST, port: env.SMTP_PORT, secure: env.SMTP_SECURE,
+      user: env.SMTP_USER, pass: env.SMTP_PASS, from: env.SMTP_FROM
+    });
+    if (env.NODE_ENV === 'production') await emailSender.verify();
 
     const workers = new WorkerManager({ timeoutMs: env.WORKER_TIMEOUT_MS, maxPending: env.WORKER_MAX_PENDING, report });
     shutdown.add(() => workers.close());
@@ -31,7 +40,7 @@ export async function startApplication(env: Environment, report: (error: unknown
 
     const readers = createMongoReaders(connection, { users: env.USER_COLLECTION, quizzes: env.QUIZ_COLLECTION });
     const auth = createAuth(new JwtVerifier(env.JWT_SECRET), readers.sessions);
-    const features = createFeatureModules({ env, connection, auth, workers, report });
+    const features = createFeatureModules({ env, connection, auth, workers, emailSender, report });
     for (const feature of features) await feature.ensureIndexes?.();
     for (const feature of features) {
       if (feature.stopJobs) shutdown.add(feature.stopJobs);
@@ -56,7 +65,7 @@ export async function startApplication(env: Environment, report: (error: unknown
       server.close(error => error ? reject(error) : resolve());
       server.closeIdleConnections();
     }));
-    return { server, stop: () => shutdown.stop() };
+    return server;
   } catch (error: unknown) {
     await shutdown.stop().catch(report);
     throw error;

@@ -1,8 +1,8 @@
 # Attempt contract for team review
 
 Owner: Mohamed Mostafa. This document covers starting, submitting, and reviewing
-quiz attempts. Everything lives in `src/modules/attempt/`. No shared file is
-changed. The integration steps below are for the platform owner.
+quiz attempts. The module lives in `src/modules/attempt/` and is wired into
+`src/server.ts` (see "Server integration").
 
 ## Routes (student only, under `/api/v1`)
 
@@ -14,7 +14,8 @@ changed. The integration steps below are for the platform owner.
 
 Decisions taken (open to team review):
 
-- An unpublished quiz returns 404, so students cannot learn that it exists.
+- An unpublished or archived (`isArchived`) quiz returns 404, matching the
+  Catalog student view.
 - Bad answers are rejected with 400 *before* the attempt is claimed, so a
   malformed request never uses up the attempt. Late submissions skip this check.
 - A student may hold several attempts for the same quiz.
@@ -51,36 +52,46 @@ Indexes: Dashboard's `dashboard_student_history` and `dashboard_quiz_analytics`
 come from the existing bootstrap. This module adds `attempt_expiry_sweep`
 `(status, expiresAt)`.
 
-## Fields read from other modules (please confirm)
+## Fields read from other modules
 
 - **Catalog (Ali)**, collection `QUIZ_COLLECTION`: `title`, `imageUrl`,
-  `durationMinutes`, `passingScorePercentage` (default 50), `isPublished`.
+  `durationMinutes`, `passingScorePercentage` (default 50), `isPublished`,
+  `isArchived`.
 - **Questions (Ziad)**, collection `questions`: `quizId` (ObjectId), `type`
   (`single`/`multi`), `text`, `options[{ optionId, text }]`, `correctOptionIds`,
   and `points` (default 1). Questions are ordered by `_id`. Hard delete is assumed;
   tell me if questions are soft-deleted so the filter can exclude them.
 
-## Integration steps for the platform owner (not done in this branch)
+## Question limits (agreed upper bound with the Question Bank)
 
-1. In `src/common/errors/public-error.ts`, add `ATTEMPT_EXPIRED`,
-   `ATTEMPT_ALREADY_SUBMITTED`, and `ATTEMPT_NOT_SUBMITTED` to the allow-list.
-   Until then the HTTP status is correct, but the code reaches clients as `REQUEST_ERROR`.
-2. In `src/server.ts`:
+Attempt snapshot limits are an upper bound of the Question Bank request limits, so
+a question the Question Bank accepts can always be started:
 
-   ```ts
-   const attempts = createAttemptModule({
-     connection: database, auth, report,
-     collections: { attempts: env.ATTEMPT_COLLECTION, quizzes: env.QUIZ_COLLECTION }
-   });
-   await attempts.ensureIndexes();
-   // createApp({ ..., moduleRouters: [attempts.router] })
-   attempts.startBackgroundJobs();
-   // shutdown: stopWorkers: async () => { await attempts.stop(); await workers.close(); }
-   ```
+| Field | Attempts accepts |
+| --- | --- |
+| Question text | 1 to 10,000 characters |
+| Options | 2 to 100, option text up to 2,000 characters |
+| Option ID | 1 to 64 characters |
+| Points | positive integer |
+
+These match the Question Bank DTO and model on `main` (10,000 characters, 100 options).
+
+## Server integration
+
+- `src/common/errors/public-error.ts` lists `ATTEMPT_EXPIRED`,
+  `ATTEMPT_ALREADY_SUBMITTED`, and `ATTEMPT_NOT_SUBMITTED`.
+- `src/server.ts` creates the module after auth, ensures the expiry index, adds
+  `attempts.router` to the single `moduleRouters` array with the Catalog and
+  Question Bank routers, starts the expiry job after the server listens, and
+  stops it before MongoDB closes (also when startup fails).
+- The model is registered as `QuizAttempt`, which the Question Bank attempt export adapter uses.
 
 ## Verification
 
 `npm test` runs the unit, HTTP, and live MongoDB specs. The live spec
 (`attempt.integration.spec.ts`) uses a temporary database at
 `ATTEMPT_TEST_MONGO_URI` (default `mongodb://127.0.0.1:27017`) and is skipped
-when no server is reachable.
+when no server is reachable. `npm run check:integration` also starts the real
+server and checks starting, submitting (including parallel submits and the grace
+window), reviewing, public error codes, archived quizzes, Dashboard history, and
+the Question Bank attempt export.

@@ -22,12 +22,12 @@ export function createQuestionModel(connection: Connection, collectionName = 'qu
   const schema = new Schema<QuestionRecord>({
     quizId: { type: Schema.Types.ObjectId, ref: 'Quiz', required: true },
     type: { type: String, enum: ['single', 'multi'], required: true },
-    text: { type: String, required: true, trim: true, maxlength: 5_000 },
+    text: { type: String, required: true, trim: true, maxlength: 10_000 },
     options: {
       type: [optionSchema], required: true,
       validate: {
-        validator: (value: QuestionOption[]) => value.length >= 2 && value.length <= 50,
-        message: 'A question must have between 2 and 50 options'
+        validator: (value: QuestionOption[]) => value.length >= 2 && value.length <= 100,
+        message: 'A question must have between 2 and 100 options'
       }
     },
     correctOptionIds: {

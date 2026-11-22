@@ -7,7 +7,11 @@ import { MAX_QUESTIONS_PER_ATTEMPT } from '../dashboard/analytics-limits.js';
 export { MAX_QUESTIONS_PER_ATTEMPT };
 export const SUBMIT_GRACE_MS = 10_000;
 export const STALE_CLAIM_MS = 60_000;
-export const MAX_OPTIONS_PER_QUESTION = 50;
+// Content limits are an upper bound of the Question Bank limits (question.dto.ts),
+// so any question the Question Bank accepts can always be snapshotted.
+export const MAX_QUESTION_TEXT_LENGTH = 10_000;
+export const MAX_OPTION_TEXT_LENGTH = 2_000;
+export const MAX_OPTIONS_PER_QUESTION = 100;
 export const DEFAULT_PASSING_SCORE_PERCENTAGE = 50;
 
 export const ATTEMPT_STATUSES = ['IN_PROGRESS', 'SUBMITTING', 'SUBMITTED', 'EXPIRED'] as const;
@@ -17,12 +21,12 @@ export const QUESTION_TYPES = ['single', 'multi'] as const;
 export type QuestionType = (typeof QUESTION_TYPES)[number];
 
 export const optionIdSchema = z.string().min(1).max(64);
-const optionSchema = z.object({ optionId: optionIdSchema, text: z.string().max(2000) });
+const optionSchema = z.object({ optionId: optionIdSchema, text: z.string().max(MAX_OPTION_TEXT_LENGTH) });
 
 // BR-08 and BR-09: the snapshot copied onto an attempt must have a usable answer key.
 export const questionSnapshotSchema = z.object({
   questionId: objectIdSchema,
-  text: z.string().min(1).max(5000),
+  text: z.string().min(1).max(MAX_QUESTION_TEXT_LENGTH),
   type: z.enum(QUESTION_TYPES),
   options: z.array(optionSchema).min(2).max(MAX_OPTIONS_PER_QUESTION),
   points: z.number().int().positive(),

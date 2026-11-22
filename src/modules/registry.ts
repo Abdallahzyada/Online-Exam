@@ -6,7 +6,9 @@ import { ensureDashboardIndexes } from '../config/dashboard-indexes.js';
 import { AppError, NotFoundError } from '../common/errors/app-error.js';
 import type { createAuth } from '../common/middlewares/auth-jwt.js';
 import type { WorkerManager } from '../common/workers/worker-manager.js';
+import type { EmailSender } from '../common/utils/email-sender.js';
 import { createAuthRouter } from './auth/auth.routes.js';
+import { AuthEmailAdapter } from './auth/auth-email.adapter.js';
 import { createCatalogRouter } from './catalog/catalog.routes.js';
 import { createQuestionModel } from './question/question.model.js';
 import { MongooseQuestionRepository } from './question/question.repository.js';
@@ -30,10 +32,11 @@ export interface ModuleContext {
   readonly connection: Connection;
   readonly auth: ReturnType<typeof createAuth>;
   readonly workers: WorkerManager;
+  readonly emailSender: EmailSender;
   readonly report: (error: unknown) => void;
 }
 
-export function createFeatureModules({ env, connection, auth, workers, report }: ModuleContext): FeatureModule[] {
+export function createFeatureModules({ env, connection, auth, workers, emailSender, report }: ModuleContext): FeatureModule[] {
   const readers = createMongoReaders(connection, { users: env.USER_COLLECTION, quizzes: env.QUIZ_COLLECTION });
   const errors = {
     notFound: (resource: string) => new NotFoundError(resource),
@@ -53,12 +56,8 @@ export function createFeatureModules({ env, connection, auth, workers, report }:
       router: createAuthRouter({
         connection, collectionName: env.USER_COLLECTION, auth, reportError: report,
         jwtSecret: env.JWT_SECRET, jwtExpiresIn: env.JWT_EXPIRES_IN, otpExpiresMinutes: env.OTP_EXPIRES_MINUTES,
-        emailSender: {
-          async sendPasswordResetCode(email, code) {
-            if (env.NODE_ENV === 'production') throw new Error('Production email sender is not configured');
-            console.info(`[DEV ONLY] Password reset code for ${email}: ${code}`);
-          }
-        }
+        authTokenSecret: env.AUTH_TOKEN_SECRET,
+        emailSender: new AuthEmailAdapter(emailSender)
       })
     },
     { name: 'catalog', router: createCatalogRouter(auth) },

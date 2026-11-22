@@ -11,11 +11,13 @@ export interface UserRecord {
   role: Role;
   tokenVersion: number;
 
-  resetOtpHash?: string;
+    resetOtpHash?: string;
   resetOtpExpiresAt?: Date;
   resetOtpSentAt?: Date;
   resetOtpAttempts: number;
-  resetOtpVerifiedAt?: Date;
+
+  resetTokenHash?: string;
+  resetTokenExpiresAt?: Date;
 }
 
 export type UserDocument = HydratedDocument<UserRecord>;
@@ -42,11 +44,14 @@ const userSchema = new Schema<UserRecord>(
     },
     tokenVersion: { type: Number, default: 0, min: 0, required: true },
 
-    resetOtpHash: { type: String, select: false },
+     resetOtpHash: { type: String, select: false },
     resetOtpExpiresAt: { type: Date, select: false },
     resetOtpSentAt: { type: Date, select: false },
     resetOtpAttempts: { type: Number, default: 0, select: false },
-    resetOtpVerifiedAt: { type: Date, select: false }
+
+    resetTokenHash: { type: String, select: false },
+    resetTokenExpiresAt: { type: Date, select: false }
+    
   },
   {
     timestamps: true,

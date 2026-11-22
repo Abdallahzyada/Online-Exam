@@ -32,6 +32,7 @@
     "jose": "^6.2.17",
     "mongodb-connection-string-url": "^7.0.3",
     "mongoose": "^9.12.2",
+    "nodemailer": "^10.6.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -40,6 +41,7 @@
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.6.6",
+    "@types/nodemailer": "^8.0.2",
     "@types/supertest": "^7.2.1",
     "jest": "^30.5.2",
     "mingo": "^7.2.7",
