@@ -7,9 +7,10 @@ import { createServer } from 'node:net';
 import { setTimeout } from 'node:timers/promises';
 import mongoose from 'mongoose';
 import { SignJWT } from 'jose';
+import { testMongoBaseUri, temporaryMongoUri } from '../dist/config/test-database-uri.js';
 
 const databaseName = 'online_exam_check_' + randomBytes(8).toString('hex');
-const mongoUri = 'mongodb://127.0.0.1:27017/' + databaseName;
+const mongoUri = temporaryMongoUri(testMongoBaseUri(), databaseName);
 const secret = randomBytes(32).toString('hex');
 const authTokenSecret = randomBytes(32).toString('hex');
 const key = new TextEncoder().encode(secret);
@@ -246,6 +247,33 @@ try {
     assert.equal(exportedLines.length, 2);
     assert.ok(exportedLines.some(line => line.includes(startedAttempt.body.data.attemptId)));
   });
+  // Exercise the transaction paths as well as reads and streaming exports.
+  const transactionQuiz = id(209);
+  await quizzes.insertOne({ _id: transactionQuiz, title: 'Question transaction check', questionsCount: 0, totalPoints: 0 });
+  async function questionMutation(method, path, body) {
+    const response = await fetch(base + path, {
+      method, headers: { Authorization: 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
+      ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15_000)
+    });
+    return { status: response.status, body: await response.json() };
+  }
+  const createdQuestion = await questionMutation('POST', '/admin/quizzes/' + transactionQuiz + '/questions', {
+    type: 'single', text: 'Transaction check', options: [{ optionId: 'a', text: 'A' }, { optionId: 'b', text: 'B' }],
+    correctOptionIds: ['a'], points: 2
+  });
+  checked('Question create commits the question and quiz counters', () => assert.equal(createdQuestion.status, 201));
+  const createdCounters = await quizzes.findOne({ _id: transactionQuiz });
+  assert.equal(createdCounters.questionsCount, 1);
+  assert.equal(createdCounters.totalPoints, 2);
+  const updatedQuestion = await questionMutation('PATCH', '/admin/questions/' + createdQuestion.body.data.id, { points: 3 });
+  checked('Question update commits the new points and quiz total', () => assert.equal(updatedQuestion.status, 200));
+  assert.equal((await quizzes.findOne({ _id: transactionQuiz })).totalPoints, 3);
+  const deletedQuestion = await questionMutation('DELETE', '/admin/questions/' + createdQuestion.body.data.id);
+  checked('Question delete removes the question and restores quiz counters', () => assert.equal(deletedQuestion.status, 200));
+  assert.equal(await connection.collection('questions').countDocuments({ quizId: transactionQuiz }), 0);
+  const deletedCounters = await quizzes.findOne({ _id: transactionQuiz });
+  assert.equal(deletedCounters.questionsCount, 0);
+  assert.equal(deletedCounters.totalPoints, 0);
   const attemptIndexes = await attempts.listIndexes().toArray();
   checked('Attempt expiry index is provisioned at startup', () => assert.ok(attemptIndexes.some(index => index.name === 'attempt_expiry_sweep')));
 

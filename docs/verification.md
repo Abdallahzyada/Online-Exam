@@ -67,8 +67,10 @@ submission, and streaming flows need tests when those implementations arrive.
 
 ## Repeat locally
 
-Run npm ci, npm run setup:env, then npm run verify. Local MongoDB must be available
-at 127.0.0.1:27017 for live integration checks. setup:env generates a signing key
+Run npm ci, npm run setup:env, npm run db:local -- --write-env, then npm run verify.
+Install MongoDB Community Server first. Both live suites use TEST_MONGO_URI,
+then MONGO_URI from the environment or .env, then the local replica set on port
+27018. setup:env generates a signing key
 without displaying it. Restart a running server after a key change and create a
 new manual token. npm run check:integration alone requires a current build.
 

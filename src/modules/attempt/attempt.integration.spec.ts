@@ -13,10 +13,11 @@ import { createAttemptModule } from './attempt.module.js';
 import type { AttemptModule } from './attempt.module.js';
 import { ATTEMPT_EXPIRY_INDEX } from './attempt.model.js';
 import { createAttemptCatalogReaders } from './attempt.catalog-adapter.js';
+import { testMongoBaseUri, temporaryMongoUri } from '../../config/test-database-uri.js';
 
 // Live MongoDB checks. Set ATTEMPT_TEST_MONGO_URI to point elsewhere; skipped when
 // no server answers. Each run uses and drops its own temporary database.
-const baseUri = process.env.ATTEMPT_TEST_MONGO_URI ?? 'mongodb://127.0.0.1:27017';
+const baseUri = testMongoBaseUri(process.env.ATTEMPT_TEST_MONGO_URI);
 async function reachable(): Promise<boolean> {
   const probe = mongoose.createConnection(baseUri, { serverSelectionTimeoutMS: 1500 });
   try { await probe.asPromise(); return true; } catch { return false; } finally { await probe.close().catch(() => undefined); }
@@ -37,7 +38,7 @@ suite('Attempts against live MongoDB', () => {
   let app: express.Express;
 
   beforeAll(async () => {
-    connection = mongoose.createConnection(`${baseUri.replace(/\/$/, '')}/online_exam_attempt_${randomBytes(6).toString('hex')}`);
+    connection = mongoose.createConnection(temporaryMongoUri(baseUri, `online_exam_attempt_${randomBytes(6).toString('hex')}`));
     await connection.asPromise();
     await connection.collection('quizzes').insertMany([
       { _id: quiz, title: 'Live Quiz', imageUrl: 'https://example.com/q.png', durationMinutes: 15, passingScorePercentage: 50, isPublished: true },
