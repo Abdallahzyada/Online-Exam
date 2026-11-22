@@ -124,37 +124,94 @@ in CORS_ORIGINS. Health is public and outside the API rate limit.
 
 ### Local MongoDB setup
 
-Question create, update and delete use MongoDB transactions. They need a replica
-set; a standalone server returns HTTP 500 for these operations.
+Follow these steps to run the project on your computer.
 
-Install MongoDB Community Server, then run:
+1. Install **Node.js 22.18 or newer** and **MongoDB Community Server**.
+2. Open a terminal in the project folder. Save any local changes before switching branches.
+3. Get the latest code:
+
+```text
+git switch main
+git pull origin main
+```
+
+4. Install the packages and prepare your settings:
 
 ```text
 npm ci
 npm run setup:env
+```
+
+5. Start the local database and the server:
+
+```text
 npm run db:local -- --write-env
 npm run dev
 ```
 
-The database command starts a separate single-node replica set on localhost port
-27018. It uses the installed `mongod` (automatically found on Windows), or the
-executable set in `MONGOD_PATH`. On other systems, put `mongod` on PATH.
-Run `npm run db:local` again after restarting the computer. If port 27018 is used
-by another database, choose `npm run db:local -- --port=27019 --write-env`.
-It never converts the server on port 27017 or copies its data. The new database
-starts empty. `--write-env` changes only `MONGO_URI`; omit it to keep the existing
-connection. Existing Atlas or other replica-set connections can be used directly.
-Private settings, database files and logs stay ignored by Git. This local server
-binds only to localhost and is for development, not production.
-Use it only on a trusted single-user machine. Other local users can access it
-because this development database has no authentication.
-The command checks the database directory and process before initializing or
-reusing a server. MongoDB owns the startup lock, so an interrupted launcher does
-not leave a stale launcher lock.
+6. Open http://localhost:3000/api/v1/health in your browser.
+
+Check these values:
+
+```text
+status: "ok"
+dbStatus: "connected"
+workerStatus: "ready"
+```
+
+If they match, the server is ready.
+
+### After restarting your computer
+
+Open the project folder in a terminal and run:
+
+```text
+npm run db:local
+npm run dev
+```
+
+To stop the app, press **Ctrl+C** in its terminal.
+
+### If the database does not start
+
+- Check that MongoDB Community Server is installed.
+- On Windows, the script looks for the MongoDB installation automatically.
+- On macOS or Linux, make sure `mongod` is on PATH. You can also set `MONGOD_PATH` to its full path.
+- If port 27018 is already used by another database, run:
+
+```text
+npm run db:local -- --port=27019 --write-env
+npm run dev
+```
+
+Use `npm run db:local -- --port=27019` after future computer restarts too.
+
+### About this database
+
+This creates a separate, empty database for local development. Your old database
+is kept, but its records are not copied. The new database supports transactions,
+which are needed to add, edit and delete questions.
+
+`--write-env` changes only the database connection in your private `.env` file.
+Do not upload `.env`, database files or logs. Git already ignores them.
+If you already use Atlas or another replica set, keep that connection and skip
+`db:local`. Use this local setup only on a trusted single-user computer. It has
+no database password, so other users on the same computer could access it.
+It is not a production setup.
 
 This follows the [MongoDB development replica-set setup](https://www.mongodb.com/docs/manual/tutorial/deploy-replica-set-for-testing/).
 
-Run `npm run verify` after starting the local replica set on port 27018.
+### Run the checks
+
+After starting your database, open a second terminal in the project folder:
+
+```text
+npm run verify
+```
+
+Keep the database running until the checks finish.
+
+For custom test connections:
 Both test suites use `TEST_MONGO_URI`, then `MONGO_URI` from the environment or
 `.env`, then the default local replica set. `ATTEMPT_TEST_MONGO_URI` can override
 the Attempts suite only. The checks preserve authentication settings.
