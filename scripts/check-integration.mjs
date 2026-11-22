@@ -7,12 +7,10 @@ import { createServer } from 'node:net';
 import { setTimeout } from 'node:timers/promises';
 import mongoose from 'mongoose';
 import { SignJWT } from 'jose';
-import ConnectionString from 'mongodb-connection-string-url';
+import { testMongoBaseUri, temporaryMongoUri } from '../dist/config/test-database-uri.js';
 
 const databaseName = 'online_exam_check_' + randomBytes(8).toString('hex');
-const testMongo = new ConnectionString(process.env.TEST_MONGO_URI ?? 'mongodb://127.0.0.1:27018/?replicaSet=examLocal');
-testMongo.pathname = '/' + databaseName;
-const mongoUri = testMongo.toString();
+const mongoUri = temporaryMongoUri(testMongoBaseUri(), databaseName);
 const secret = randomBytes(32).toString('hex');
 const authTokenSecret = randomBytes(32).toString('hex');
 const key = new TextEncoder().encode(secret);

@@ -146,11 +146,18 @@ starts empty. `--write-env` changes only `MONGO_URI`; omit it to keep the existi
 connection. Existing Atlas or other replica-set connections can be used directly.
 Private settings, database files and logs stay ignored by Git. This local server
 binds only to localhost and is for development, not production.
+Use it only on a trusted single-user machine. Other local users can access it
+because this development database has no authentication.
+The command checks the database directory and process before initializing or
+reusing a server. MongoDB owns the startup lock, so an interrupted launcher does
+not leave a stale launcher lock.
 
 This follows the [MongoDB development replica-set setup](https://www.mongodb.com/docs/manual/tutorial/deploy-replica-set-for-testing/).
 
 Run `npm run verify` after starting the local replica set on port 27018.
-For another test server, set `TEST_MONGO_URI` to its connection string.
+Both test suites use `TEST_MONGO_URI`, then `MONGO_URI` from the environment or
+`.env`, then the default local replica set. `ATTEMPT_TEST_MONGO_URI` can override
+the Attempts suite only. The checks preserve authentication settings.
 The checks replace only the database name with a unique temporary name.
 This runs Jest coverage, builds the project, checks real worker failures and
 recovery, fixture-lock checks, then live integration scenarios through the server and MongoDB.

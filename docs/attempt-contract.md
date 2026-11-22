@@ -90,7 +90,8 @@ These match the Question Bank DTO and model on `main` (10,000 characters, 100 op
 
 `npm test` runs the unit, HTTP, and live MongoDB specs. The live spec
 (`attempt.integration.spec.ts`) uses a temporary database at
-`ATTEMPT_TEST_MONGO_URI` (default `mongodb://127.0.0.1:27017`) and is skipped
+`ATTEMPT_TEST_MONGO_URI`, then `TEST_MONGO_URI`, then `MONGO_URI` from the environment
+or `.env` (default `mongodb://127.0.0.1:27018/?replicaSet=examLocal`) and is skipped
 when no server is reachable. `npm run check:integration` also starts the real
 server and checks starting, submitting (including parallel submits and the grace
 window), reviewing, public error codes, archived quizzes, Dashboard history, and

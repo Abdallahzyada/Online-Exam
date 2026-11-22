@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, open, readFile, readdir } from 'node:fs/promises';
 import { createConnection } from 'node:net';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import mongoose from 'mongoose';
 import { withFileLock } from './helpers/file-lock.mjs';
@@ -41,7 +41,9 @@ async function executable() {
 }
 
 await mkdir(directory, { recursive: true });
-await withFileLock(new URL(`.local/mongodb-rs-${port}.lock`, root), async () => {
+// mongod's own data-directory lock serializes competing starts. No launcher lock
+// is left behind if this short-lived process is interrupted.
+async function start() {
   let child;
   let connection;
   let ready = false;
@@ -70,12 +72,27 @@ await withFileLock(new URL(`.local/mongodb-rs-${port}.lock`, root), async () => 
       serverSelectionTimeoutMS: 3000, socketTimeoutMS: 5000
     });
     await connection.asPromise();
+    async function verifyOwner() {
+      const options = await connection.db.admin().command({ getCmdLineOpts: 1 });
+      const actualPath = options.parsed?.storage?.dbPath;
+      if (!actualPath || resolve(actualPath) !== resolve(directory, 'data')) {
+        throw new Error('This port belongs to another database directory. Choose another --port.');
+      }
+      if (child) {
+        const status = await connection.db.admin().command({ serverStatus: 1 });
+        if (child.exitCode !== null || Number(status.pid) !== child.pid) {
+          throw new Error('The reachable database is not the process started by this command.');
+        }
+      }
+    }
+    await verifyOwner();
     try {
       const status = await connection.db.admin().command({ replSetGetStatus: 1 });
       if (status.set !== 'examLocal') throw new Error('This port belongs to another replica set. It was not changed.');
     } catch (error) {
       // Only initialize a new process started by this command. Never convert an existing server.
       if (error.code !== 94 || !child) throw error;
+      await verifyOwner();
       await connection.db.admin().command({ replSetInitiate: {
         _id: 'examLocal', members: [{ _id: 0, host: `127.0.0.1:${port}` }]
       } });
@@ -89,6 +106,7 @@ await withFileLock(new URL(`.local/mongodb-rs-${port}.lock`, root), async () => 
     }
     ready = true;
     if (args.includes('--write-env')) {
+      await verifyOwner();
       await withFileLock(new URL('.local/setup-env.lock', root), async () => {
         const file = new URL('.env', root);
         // Require setup:env first; it creates private signing keys as well as the file.
@@ -102,8 +120,10 @@ await withFileLock(new URL(`.local/mongodb-rs-${port}.lock`, root), async () => 
     }
     console.log(`Local MongoDB replica set ready: ${uri}`);
     console.log('Run this command again after restarting your computer. Use this setup for local development only.');
+    console.log('Single-user machines only: this localhost database has no authentication.');
   } finally {
     await connection?.close();
     if (child && !ready) child.kill();
   }
-});
+}
+await start();
