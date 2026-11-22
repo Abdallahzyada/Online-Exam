@@ -15,14 +15,25 @@ await withFileLock(new URL('../.local/setup-env.lock', import.meta.url), async (
     if (error.code !== 'ENOENT') throw error;
     text = await readFile(new URL('../.env.example', import.meta.url), 'utf8');
   }
-  const match = /^JWT_SECRET=(.*)$/m.exec(text);
-  if (rotate || !match || !match[1].trim() || match[1].includes('replace-with-')) {
-    const line = 'JWT_SECRET=' + randomBytes(32).toString('hex');
-    text = match ? text.replace(/^JWT_SECRET=.*$/m, line) : text.trimEnd() + '\n' + line + '\n';
-    await writePrivateFile(fileURLToPath(file), text);
-    console.log('Local .env is ready with a newly generated signing key. Restart the server to use it.');
-  } else {
-    await writePrivateFile(fileURLToPath(file), text);
-    console.log('Existing signing key preserved with private file permissions. Format checks cannot verify randomness. Use --rotate-key to generate a new random key.');
+const keys = ['JWT_SECRET', 'AUTH_TOKEN_SECRET'];
+
+for (const key of keys) {
+  const match = new RegExp(`^${key}=(.*)$`, 'm').exec(text);
+
+  if (
+    rotate ||
+    !match ||
+    !match[1].trim() ||
+    match[1].includes('replace-with-')
+  ) {
+    const line = `${key}=${randomBytes(32).toString('hex')}`;
+
+    text = match
+      ? text.replace(new RegExp(`^${key}=.*$`, 'm'), line)
+      : text.trimEnd() + '\n' + line + '\n';
   }
+}
+
+await writePrivateFile(fileURLToPath(file), text);
+console.log('Local .env is ready. Existing keys were preserved unless missing or rotation was requested.');
 });

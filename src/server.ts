@@ -16,11 +16,13 @@ import { createCatalogRouter } from './modules/catalog/catalog.routes.js';
 import { createAttemptModule } from './modules/attempt/attempt.module.js';
 import type { AttemptModule } from './modules/attempt/attempt.module.js';
 import { createApp } from './app.js';
+import { createAuthRouter } from './modules/auth/auth.routes.js';
+import { SmtpEmailSender } from './common/utils/smtp-email-sender.js';
+import { AuthEmailAdapter } from './modules/auth/auth-email.adapter.js';
 import { createQuestionModel } from './modules/question/question.model.js';
 import { createQuestionRouter } from './modules/question/question.routes.js';
 import { MongooseQuestionRepository } from './modules/question/question.repository.js';
 import { createAttemptExportSource } from './modules/question/question.attempt-adapter.js';
-
 async function main(): Promise<void> {
   const env = parseEnvironment(process.env);
   const report = (error: unknown) => {
@@ -33,6 +35,18 @@ async function main(): Promise<void> {
   const workers = new WorkerManager({ timeoutMs: env.WORKER_TIMEOUT_MS, maxPending: env.WORKER_MAX_PENDING, report });
   try {
     connection = await connectDatabase(env.MONGO_URI, env.NODE_ENV === 'production');
+    const smtpEmailSender = new SmtpEmailSender({
+  host: env.SMTP_HOST,
+  port: env.SMTP_PORT,
+  secure: env.SMTP_SECURE,
+  user: env.SMTP_USER,
+  pass: env.SMTP_PASS,
+  from: env.SMTP_FROM
+});
+
+if (env.NODE_ENV === 'production') {
+  await smtpEmailSender.verify();
+}
     const database = connection;
     await ensureDashboardIndexes(database, env.ATTEMPT_COLLECTION);
     const readers = createMongoReaders(database, { users: env.USER_COLLECTION, quizzes: env.QUIZ_COLLECTION });
@@ -49,24 +63,59 @@ async function main(): Promise<void> {
     };
     workers.start();
     monitor.start();
-    const app = createApp({
-      auth, trustProxy: env.TRUST_PROXY, reportError: report, corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
-      moduleRouters: [
-        createCatalogRouter(auth),
-        createQuestionRouter(
-          new MongooseQuestionRepository({ connection: database, questions: questionModel, quizCollection: env.QUIZ_COLLECTION }),
-          auth,
-          createAttemptExportSource(database)
-        ),
-        attempts.router
-      ],
-      dashboard: {
-        profiles: readers.profiles, quizzes: readers.quizzes, errors,
-        repository: new MongooseDashboardRepository({ connection: database, attemptCollection: env.ATTEMPT_COLLECTION, errors }),
-        analytics: new DashboardAnalyticsAdapter(workers)
-      },
-      health: { dbReady: () => database.readyState === 1, workerReady: () => workers.isReady(), eventLoop: monitor, uptime: () => process.uptime() }
-    });
+const app = createApp({
+  auth,
+  trustProxy: env.TRUST_PROXY,
+  reportError: report,
+  corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
+
+  moduleRouters: [
+    createCatalogRouter(auth),
+
+    createQuestionRouter(
+      new MongooseQuestionRepository({
+        connection: database,
+        questions: questionModel,
+        quizCollection: env.QUIZ_COLLECTION
+      }),
+      auth,
+      createAttemptExportSource(database)
+    ),
+
+    attempts.router,
+
+    createAuthRouter({
+      connection: database,
+      collectionName: env.USER_COLLECTION,
+      authTokenSecret: env.AUTH_TOKEN_SECRET,
+      auth,
+      jwtSecret: env.JWT_SECRET,
+      jwtExpiresIn: env.JWT_EXPIRES_IN,
+      otpExpiresMinutes: env.OTP_EXPIRES_MINUTES,
+      reportError: report,
+      emailSender: new AuthEmailAdapter(smtpEmailSender)
+    })
+  ],
+
+  dashboard: {
+    profiles: readers.profiles,
+    quizzes: readers.quizzes,
+    errors,
+    repository: new MongooseDashboardRepository({
+      connection: database,
+      attemptCollection: env.ATTEMPT_COLLECTION,
+      errors
+    }),
+    analytics: new DashboardAnalyticsAdapter(workers)
+  },
+
+  health: {
+    dbReady: () => database.readyState === 1,
+    workerReady: () => workers.isReady(),
+    eventLoop: monitor,
+    uptime: () => process.uptime()
+  }
+});
     const server = createServer(app);
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);

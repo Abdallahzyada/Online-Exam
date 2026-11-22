@@ -11,6 +11,7 @@ import { SignJWT } from 'jose';
 const databaseName = 'online_exam_check_' + randomBytes(8).toString('hex');
 const mongoUri = 'mongodb://127.0.0.1:27017/' + databaseName;
 const secret = randomBytes(32).toString('hex');
+const authTokenSecret = randomBytes(32).toString('hex');
 const key = new TextEncoder().encode(secret);
 const connection = mongoose.createConnection(mongoUri, { serverSelectionTimeoutMS: 5000 });
 const checks = [];
@@ -39,7 +40,7 @@ const port = await unusedPort();
 const base = 'http://127.0.0.1:' + port + '/api/v1';
 const environment = {
   ...process.env, NODE_ENV: 'test', PORT: String(port), MONGO_URI: mongoUri,
-  JWT_SECRET: secret, JWT_EXPIRES_IN: '5m', OTP_EXPIRES_MINUTES: '10',
+  JWT_SECRET: secret,AUTH_TOKEN_SECRET: authTokenSecret, JWT_EXPIRES_IN: '5m', OTP_EXPIRES_MINUTES: '10',
   USER_COLLECTION: 'users', QUIZ_COLLECTION: 'quizzes', ATTEMPT_COLLECTION: 'quizattempts',
   WORKER_TIMEOUT_MS: '30000', WORKER_MAX_PENDING: '4'
 };
