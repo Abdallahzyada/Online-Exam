@@ -89,14 +89,26 @@ The default request timeout is 30 seconds. The worker protocol currently registe
 This is the one shared manager: modules should not create their own Worker.
 
 Health reports event-loop delays in milliseconds, database status, and worker
-readiness. Monitoring starts at bootstrap, not on each request. Measurements are
-since process startup. SIGINT and SIGTERM stop HTTP admission and drain active
+readiness. Monitoring starts at bootstrap, not on each request. The delay values
+cover the last complete 5-second window, so health shows current lag instead of
+an average since startup; before the first window ends they cover the time since
+start. Restarting the monitor clears the previous run's window and samples.
+SIGINT and SIGTERM stop HTTP admission and drain active
 requests while workers and MongoDB remain available, then stop workers, close
 MongoDB and stop monitoring. Repeated signals use the same guarded shutdown.
 An unref'ed 10-second safety deadline remains armed even after cleanup fails;
 it does not keep a clean process alive.
-Successful cleanup clears the deadline. A later server error still changes the
-exit code to failure even if shutdown has already started.
+Successful cleanup clears the deadline and exits explicitly with the final code,
+so a timer or socket left open by any module cannot keep the process running
+after cleanup. A server error during shutdown still changes the exit code to failure.
+An uncaught exception (including an unhandled promise rejection) is reported and
+runs the same graceful shutdown, then exits with code 1. Exit code 1 is set as soon
+as that shutdown starts, so a cleanup that never finishes cannot end the process
+with code 0. The signal and fatal-error handlers are registered before startup
+opens MongoDB, the worker or the monitor, so a crash during startup still closes
+what was opened. Error logs show the `AppError` code, or the error class name and
+up to 10 stack frames; error messages are never logged because they can contain
+request data or connection strings.
 
 The API JSON limit is 100 KB. NDJSON streaming imports use a different content
 type and are not consumed by the JSON parser. The global limit is 300 requests
