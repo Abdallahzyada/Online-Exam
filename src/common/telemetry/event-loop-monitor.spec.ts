@@ -13,7 +13,8 @@ function fakeHistogram() {
     enable: jest.fn(() => true),
     disable: jest.fn(() => true),
     reset: jest.fn(() => { Object.assign(values, { count: 0, mean: Number.NaN, max: 0, p99: 0 }); }),
-    percentile: jest.fn((_percentile: number) => values.p99)
+    // Only the 99th percentile has a value, so asking for any other one shows up as a wrong p99.
+    percentile: jest.fn((percentile: number) => percentile === 99 ? values.p99 : Number.NaN)
   } satisfies DelayHistogram;
   const record = (meanMs: number, maxMs: number, p99Ms: number) => {
     Object.assign(values, { count: 500, mean: meanMs * 1e6, max: maxMs * 1e6, p99: p99Ms * 1e6 });
@@ -48,9 +49,10 @@ describe('event loop metrics', () => {
     monitor.start();
     fake.record(2, 180, 150); // a blocked loop during the first window
     expect(monitor.snapshot()).toEqual({ meanDelayMs: 2, maxDelayMs: 180, p99DelayMs: 150 });
+    expect(fake.histogram.percentile).toHaveBeenCalledWith(99);
 
     await jest.advanceTimersByTimeAsync(1_000);
-    expect(fake.histogram.reset).toHaveBeenCalledTimes(1);
+    expect(fake.histogram.reset).toHaveBeenCalledTimes(2); // once at start, once when the window closed
     fake.record(1, 12, 11); // the next window is still running
     expect(monitor.snapshot()).toEqual({ meanDelayMs: 2, maxDelayMs: 180, p99DelayMs: 150 });
 
@@ -79,7 +81,24 @@ describe('event loop metrics', () => {
     monitor.stop();
     await jest.advanceTimersByTimeAsync(5_000);
     expect(fake.histogram.disable).toHaveBeenCalledTimes(1);
-    expect(fake.histogram.reset).not.toHaveBeenCalled();
+    expect(fake.histogram.reset).toHaveBeenCalledTimes(1); // only the reset at start; no window closed
+  });
+
+  it('clears the previous run when restarted', async () => {
+    jest.useFakeTimers();
+    const fake = fakeHistogram();
+    const monitor = new EventLoopMonitor({ windowMs: 1_000, histogram: fake.histogram });
+    monitor.start();
+    fake.record(2, 180, 150);
+    await jest.advanceTimersByTimeAsync(1_000);
+    fake.record(3, 90, 80); // samples left in the histogram when the run stops
+    monitor.stop();
+
+    monitor.start();
+    expect(monitor.snapshot()).toEqual({ meanDelayMs: 0, maxDelayMs: 0, p99DelayMs: 0 });
+    fake.record(1, 12, 11);
+    expect(monitor.snapshot()).toEqual({ meanDelayMs: 1, maxDelayMs: 12, p99DelayMs: 11 });
+    monitor.stop();
   });
 
   it('rejects an invalid window length', () => {

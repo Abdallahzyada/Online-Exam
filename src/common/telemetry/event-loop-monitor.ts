@@ -33,6 +33,9 @@ export class EventLoopMonitor {
 
   start(): void {
     if (this.windowTimer) return;
+    // A new run starts clean, so a restart never reports the previous run's window or samples.
+    this.lastWindow = undefined;
+    this.histogram.reset();
     this.histogram.enable();
     this.windowTimer = setInterval(() => this.closeWindow(), this.windowMs);
     this.windowTimer.unref();
