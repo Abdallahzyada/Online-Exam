@@ -17,7 +17,10 @@ import { createApp } from './app.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 import { SmtpEmailSender } from './common/utils/smtp-email-sender.js';
 import { AuthEmailAdapter } from './modules/auth/auth-email.adapter.js';
-
+import { createQuestionModel } from './modules/question/question.model.js';
+import { createQuestionRouter } from './modules/question/question.routes.js';
+import { MongooseQuestionRepository } from './modules/question/question.repository.js';
+import { createAttemptExportSource } from './modules/question/question.attempt-adapter.js';
 async function main(): Promise<void> {
   const env = parseEnvironment(process.env);
   const report = (error: unknown) => {
@@ -44,6 +47,7 @@ if (env.NODE_ENV === 'production') {
     const database = connection;
     await ensureDashboardIndexes(database, env.ATTEMPT_COLLECTION);
     const readers = createMongoReaders(database, { users: env.USER_COLLECTION, quizzes: env.QUIZ_COLLECTION });
+    const questionModel = createQuestionModel(database);
     const auth = createAuth(new JwtVerifier(env.JWT_SECRET), readers.sessions);
     const errors = {
       notFound: (resource: string) => new NotFoundError(resource),
@@ -51,47 +55,58 @@ if (env.NODE_ENV === 'production') {
     };
     workers.start();
     monitor.start();
-        const app = createApp({
+
+const app = createApp({
+  auth,
+  trustProxy: env.TRUST_PROXY,
+  reportError: report,
+  corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
+
+  moduleRouters: [
+    createCatalogRouter(auth),
+
+    createQuestionRouter(
+      new MongooseQuestionRepository({
+        connection: database,
+        questions: questionModel,
+        quizCollection: env.QUIZ_COLLECTION
+      }),
       auth,
-      trustProxy: env.TRUST_PROXY,
+      createAttemptExportSource(database)
+    ),
+
+    createAuthRouter({
+      connection: database,
+      collectionName: env.USER_COLLECTION,
+      authTokenSecret: env.AUTH_TOKEN_SECRET,
+      auth,
+      jwtSecret: env.JWT_SECRET,
+      jwtExpiresIn: env.JWT_EXPIRES_IN,
+      otpExpiresMinutes: env.OTP_EXPIRES_MINUTES,
       reportError: report,
-      corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
+      emailSender: new AuthEmailAdapter(smtpEmailSender)
+    })
+  ],
 
-      moduleRouters: [
-        createCatalogRouter(auth),
-        createAuthRouter({
-          connection: database,
-          collectionName: env.USER_COLLECTION,
-          authTokenSecret: env.AUTH_TOKEN_SECRET,
-          auth,
-          jwtSecret: env.JWT_SECRET,
-          jwtExpiresIn: env.JWT_EXPIRES_IN,
-          otpExpiresMinutes: env.OTP_EXPIRES_MINUTES,
-          reportError: report,
+  dashboard: {
+    profiles: readers.profiles,
+    quizzes: readers.quizzes,
+    errors,
+    repository: new MongooseDashboardRepository({
+      connection: database,
+      attemptCollection: env.ATTEMPT_COLLECTION,
+      errors
+    }),
+    analytics: new DashboardAnalyticsAdapter(workers)
+  },
 
-         emailSender: new AuthEmailAdapter(smtpEmailSender)
-        })
-      ],
-
-      dashboard: {
-        profiles: readers.profiles,
-        quizzes: readers.quizzes,
-        errors,
-        repository: new MongooseDashboardRepository({
-          connection: database,
-          attemptCollection: env.ATTEMPT_COLLECTION,
-          errors
-        }),
-        analytics: new DashboardAnalyticsAdapter(workers)
-      },
-
-      health: {
-        dbReady: () => database.readyState === 1,
-        workerReady: () => workers.isReady(),
-        eventLoop: monitor,
-        uptime: () => process.uptime()
-      }
-    });
+  health: {
+    dbReady: () => database.readyState === 1,
+    workerReady: () => workers.isReady(),
+    eventLoop: monitor,
+    uptime: () => process.uptime()
+  }
+});
 
     const server = createServer(app);
     await new Promise<void>((resolve, reject) => {
