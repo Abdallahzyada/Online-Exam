@@ -2,7 +2,11 @@ import { describe, it, expect } from '@jest/globals';
 import { parseEnvironment } from './env.js';
 import { randomBytes } from 'node:crypto';
 
-const valid = { MONGO_URI: 'mongodb://localhost/exams', JWT_SECRET: randomBytes(32).toString('hex') };
+const valid = { MONGO_URI: 'mongodb://localhost/exams', JWT_SECRET: randomBytes(32).toString('hex'), AUTH_TOKEN_SECRET:
+  '0123456789abcdef' +
+  'fedcba9876543210' +
+  '02468ace13579bdf' +
+  'fdb97531eca86420', };
 describe('environment validation', () => {
   it.each(['0s', '0m', '0h', '0d', '00h'])('rejects a zero lifetime %s', JWT_EXPIRES_IN => {
     expect(() => parseEnvironment({ ...valid, JWT_EXPIRES_IN })).toThrow('JWT_EXPIRES_IN');
@@ -15,7 +19,15 @@ describe('environment validation', () => {
   });
   it('accepts development loopback and production URIs whose options will enforce TLS', () => {
     expect(parseEnvironment(valid).NODE_ENV).toBe('development');
-    expect(parseEnvironment({ ...valid, NODE_ENV: 'production', MONGO_URI: 'mongodb://db.example/exams' }).NODE_ENV).toBe('production');
+   expect(parseEnvironment({
+  ...valid,
+  NODE_ENV: 'production',
+  MONGO_URI: 'mongodb://db.example/exams',
+  SMTP_HOST: 'smtp.example.com',
+  SMTP_USER: 'test-user',
+  SMTP_PASS: 'test-password',
+  SMTP_FROM: 'noreply@example.com'
+}).NODE_ENV).toBe('production');
   });
   it('parses explicit trusted proxy networks and rejects blanket trust', () => {
     expect(parseEnvironment({ ...valid, TRUST_PROXY: '127.0.0.1/32,::1/128' }).TRUST_PROXY).toEqual(['127.0.0.1/32', '::1/128']);

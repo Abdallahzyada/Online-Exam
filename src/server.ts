@@ -15,6 +15,8 @@ import { MongooseDashboardRepository } from './modules/dashboard/dashboard.repos
 import { createCatalogRouter } from './modules/catalog/catalog.routes.js';
 import { createApp } from './app.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
+import { SmtpEmailSender } from './common/utils/smtp-email-sender.js';
+import { AuthEmailAdapter } from './modules/auth/auth-email.adapter.js';
 
 async function main(): Promise<void> {
   const env = parseEnvironment(process.env);
@@ -27,6 +29,18 @@ async function main(): Promise<void> {
   const workers = new WorkerManager({ timeoutMs: env.WORKER_TIMEOUT_MS, maxPending: env.WORKER_MAX_PENDING, report });
   try {
     connection = await connectDatabase(env.MONGO_URI, env.NODE_ENV === 'production');
+    const smtpEmailSender = new SmtpEmailSender({
+  host: env.SMTP_HOST,
+  port: env.SMTP_PORT,
+  secure: env.SMTP_SECURE,
+  user: env.SMTP_USER,
+  pass: env.SMTP_PASS,
+  from: env.SMTP_FROM
+});
+
+if (env.NODE_ENV === 'production') {
+  await smtpEmailSender.verify();
+}
     const database = connection;
     await ensureDashboardIndexes(database, env.ATTEMPT_COLLECTION);
     const readers = createMongoReaders(database, { users: env.USER_COLLECTION, quizzes: env.QUIZ_COLLECTION });
@@ -48,21 +62,14 @@ async function main(): Promise<void> {
         createAuthRouter({
           connection: database,
           collectionName: env.USER_COLLECTION,
+          authTokenSecret: env.AUTH_TOKEN_SECRET,
           auth,
           jwtSecret: env.JWT_SECRET,
           jwtExpiresIn: env.JWT_EXPIRES_IN,
           otpExpiresMinutes: env.OTP_EXPIRES_MINUTES,
           reportError: report,
 
-          emailSender: {
-            async sendPasswordResetCode(email, code) {
-              if (env.NODE_ENV === 'production') {
-                throw new Error('Production email sender is not configured');
-              }
-
-              console.info(`[DEV ONLY] Password reset code for ${email}: ${code}`);
-            }
-          }
+         emailSender: new AuthEmailAdapter(smtpEmailSender)
         })
       ],
 

@@ -28,6 +28,7 @@ export interface AuthRouterDependencies {
   jwtSecret: string;
   jwtExpiresIn: string;
   otpExpiresMinutes: number;
+   authTokenSecret: string;
   auth: AuthGuard;
   emailSender: AuthEmailSender;
   reportError: (error: unknown) => void;
@@ -47,6 +48,7 @@ export function createAuthRouter(
     jwtSecret: dependencies.jwtSecret,
     jwtExpiresIn: dependencies.jwtExpiresIn,
     otpExpiresMinutes: dependencies.otpExpiresMinutes,
+    authTokenSecret: dependencies.authTokenSecret,
     emailSender: dependencies.emailSender,
     reportError: dependencies.reportError
   });

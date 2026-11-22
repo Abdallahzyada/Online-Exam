@@ -1,4 +1,9 @@
-import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
+import {
+  createHmac,
+  randomBytes,
+  randomInt,
+  timingSafeEqual
+} from 'node:crypto';
 import bcrypt from 'bcrypt';
 import { SignJWT } from 'jose';
 
@@ -29,6 +34,7 @@ export interface AuthServiceOptions {
   jwtSecret: string;
   jwtExpiresIn: string;
   otpExpiresMinutes: number;
+   authTokenSecret: string;
   emailSender: AuthEmailSender;
   reportError: (error: unknown) => void;
 }
@@ -53,8 +59,10 @@ function generateOtp(): Promise<number> {
   });
 }
 
-function hashOtp(code: string): string {
-  return createHash('sha256').update(code).digest('hex');
+function hashResetValue(value: string, secret: string, purpose: 'otp' | 'reset'): string {
+  return createHmac('sha256', secret)
+    .update(`${purpose}:${value}`)
+    .digest('hex');
 }
 
 function isDuplicateKeyError(error: unknown): boolean {
@@ -177,8 +185,11 @@ export class AuthService {
 
   async forgotPassword(dto: ForgotPasswordDTO): Promise<string> {
     const code = String(await generateOtp());
-    const hash = hashOtp(code);
-
+    const hash = hashResetValue(
+  code,
+  this.options.authTokenSecret,
+  'otp'
+);
     const now = new Date();
     const expiresAt = new Date(
       now.getTime() + this.options.otpExpiresMinutes * 60_000
@@ -207,64 +218,91 @@ export class AuthService {
     return GENERIC_FORGOT_PASSWORD_MESSAGE;
   }
 
-  async verifyResetCode(dto: VerifyResetCodeDTO): Promise<void> {
-    const state = await this.repository.findResetOtp(dto.email);
-    const now = new Date();
+  async verifyResetCode(
+  dto: VerifyResetCodeDTO
+): Promise<{ resetToken: string }> {
+  const state = await this.repository.findResetOtp(dto.email);
+  const now = new Date();
 
-    if (
-      !state ||
-      !state.hash ||
-      !state.expiresAt ||
-      state.expiresAt <= now ||
-      state.attempts >= OTP_MAX_ATTEMPTS ||
-      state.verifiedAt
-    ) {
-      throw new UnauthorizedError();
-    }
+  if (
+    !state ||
+    !state.hash ||
+    !state.expiresAt ||
+    state.expiresAt <= now ||
+    state.attempts >= OTP_MAX_ATTEMPTS
+  ) {
+    throw new UnauthorizedError();
+  }
 
-    const expectedHash = Buffer.from(state.hash, 'hex');
-    const providedHash = Buffer.from(hashOtp(dto.code), 'hex');
+  const expectedHash = Buffer.from(state.hash, 'hex');
+  const providedHash = Buffer.from(
+    hashResetValue(dto.code, this.options.authTokenSecret, 'otp'),
+    'hex'
+  );
 
-    const matches =
-      expectedHash.length === providedHash.length &&
-      timingSafeEqual(expectedHash, providedHash);
+  const matches =
+    expectedHash.length === 32 &&
+    providedHash.length === 32 &&
+    timingSafeEqual(expectedHash, providedHash);
 
-    if (!matches) {
-      await this.repository.recordFailedOtpAttempt(
-        dto.email,
-        state.hash,
-        OTP_MAX_ATTEMPTS
-      );
-
-      throw new UnauthorizedError();
-    }
-
-    const verified = await this.repository.markResetOtpVerified(
+  if (!matches) {
+    await this.repository.recordFailedOtpAttempt(
       dto.email,
       state.hash,
-      now,
       OTP_MAX_ATTEMPTS
     );
 
-    if (!verified) {
-      throw new UnauthorizedError();
-    }
+    throw new UnauthorizedError();
   }
+
+  const resetToken = randomBytes(32).toString('base64url');
+  const resetTokenHash = hashResetValue(
+    resetToken,
+    this.options.authTokenSecret,
+    'reset'
+  );
+
+  const resetTokenExpiresAt = new Date(
+    now.getTime() + this.options.otpExpiresMinutes * 60_000
+  );
+
+  const issued = await this.repository.issuePasswordResetToken(
+    dto.email,
+    state.hash,
+    resetTokenHash,
+    resetTokenExpiresAt,
+    now,
+    OTP_MAX_ATTEMPTS
+  );
+
+  if (!issued) {
+    throw new UnauthorizedError();
+  }
+
+  return { resetToken };
+}
 
   async resetPassword(dto: ResetPasswordDTO): Promise<void> {
-    const passwordHash = await bcrypt.hash(
-      dto.newPassword,
-      PASSWORD_HASH_ROUNDS
-    );
+  const passwordHash = await bcrypt.hash(
+    dto.newPassword,
+    PASSWORD_HASH_ROUNDS
+  );
 
-    const updated = await this.repository.resetPasswordWithOtp(
-      dto.email,
-      passwordHash,
-      new Date()
-    );
+  const resetTokenHash = hashResetValue(
+    dto.resetToken,
+    this.options.authTokenSecret,
+    'reset'
+  );
 
-    if (!updated) {
-      throw new UnauthorizedError();
-    }
+  const updated = await this.repository.resetPasswordWithToken(
+    dto.email,
+    resetTokenHash,
+    passwordHash,
+    new Date()
+  );
+
+  if (!updated) {
+    throw new UnauthorizedError();
   }
+}
 }

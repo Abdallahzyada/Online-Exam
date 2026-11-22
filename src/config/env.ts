@@ -13,6 +13,12 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   MONGO_URI: z.string().refine(mongoUriIsValid, 'Use a valid MongoDB connection URL'),
   JWT_SECRET: jwtSecretSchema,
+  SMTP_HOST: z.string().default(''),
+SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+SMTP_SECURE: z.enum(['true', 'false']).default('false').transform(value => value === 'true'),
+SMTP_USER: z.string().default(''),
+SMTP_PASS: z.string().default(''),
+SMTP_FROM: z.string().default(''),
   JWT_EXPIRES_IN: z.string().regex(/^[1-9]\d*(?:s|m|h|d)$/, 'Use a positive duration such as 1h').default('1h'),
   OTP_EXPIRES_MINUTES: z.coerce.number().int().min(1).max(60).default(10),
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
@@ -21,10 +27,30 @@ export const envSchema = z.object({
   QUIZ_COLLECTION: z.string().min(1).default('quizzes'),
   ATTEMPT_COLLECTION: z.string().min(1).default('quizattempts'),
   WORKER_TIMEOUT_MS: z.coerce.number().int().min(100).max(120_000).default(30_000),
-  WORKER_MAX_PENDING: z.coerce.number().int().min(1).max(32).default(4)
+  WORKER_MAX_PENDING: z.coerce.number().int().min(1).max(32).default(4),
+  AUTH_TOKEN_SECRET: jwtSecretSchema  
 }).superRefine((env, context) => {
   if (env.NODE_ENV === 'production' && !productionMongoUriIsSecure(env.MONGO_URI)) {
     context.addIssue({ code: 'custom', path: ['MONGO_URI'], message: 'Production requires verified TLS; disabling TLS or certificate checks is not allowed' });
+  }
+  
+    if (env.NODE_ENV === 'production') {
+    const smtpFields = [
+      'SMTP_HOST',
+      'SMTP_USER',
+      'SMTP_PASS',
+      'SMTP_FROM'
+    ] as const;
+
+    for (const field of smtpFields) {
+      if (!env[field].trim()) {
+        context.addIssue({
+          code: 'custom',
+          path: [field],
+          message: 'Required in production for password reset email delivery'
+        });
+      }
+    }
   }
 });
 export type Environment = z.infer<typeof envSchema>;

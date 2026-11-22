@@ -116,11 +116,12 @@ describe('Auth DTO schemas', () => {
   });
 
   describe('resetPasswordSchema', () => {
-    const validData = {
-      email: 'ayman@example.com',
-      newPassword: 'NewStrongPass123!',
-      confirmPassword: 'NewStrongPass123!'
-    };
+   const validData = {
+  email: 'ayman@example.com',
+  resetToken: 'A'.repeat(43),
+  newPassword: 'NewStrongPass123!',
+  confirmPassword: 'NewStrongPass123!'
+};
 
     it('should accept valid reset data', () => {
       expect(resetPasswordSchema.safeParse(validData).success).toBe(true);
@@ -134,5 +135,15 @@ describe('Auth DTO schemas', () => {
         }).success
       ).toBe(false);
     });
+    it('should reject an invalid reset token', () => {
+  expect(
+    resetPasswordSchema.safeParse({
+      ...validData,
+      resetToken: '123456'
+    }).success
+  ).toBe(false);
+});
   });
+
+  
 });

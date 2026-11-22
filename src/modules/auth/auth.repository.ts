@@ -17,7 +17,6 @@ export interface ResetOtpState {
   hash: string | null;
   expiresAt: Date | null;
   attempts: number;
-  verifiedAt: Date | null;
 }
 
 export class AuthRepository {
@@ -77,7 +76,10 @@ export class AuthRepository {
           resetOtpSentAt: now,
           resetOtpAttempts: 0
         },
-        $unset: { resetOtpVerifiedAt: 1 }
+                $unset: {
+  resetTokenHash: 1,
+  resetTokenExpiresAt: 1
+}
       },
       { new: true }
     ).select('_id').exec();
@@ -88,19 +90,16 @@ export class AuthRepository {
   async findResetOtp(email: string): Promise<ResetOtpState | null> {
     const user = await this.users
       .findOne({ email })
-      .select(
-        '+resetOtpHash +resetOtpExpiresAt +resetOtpAttempts +resetOtpVerifiedAt'
-      )
+      .select('+resetOtpHash +resetOtpExpiresAt +resetOtpAttempts')
       .exec();
 
     if (!user) return null;
 
     return {
-      hash: user.resetOtpHash ?? null,
-      expiresAt: user.resetOtpExpiresAt ?? null,
-      attempts: user.resetOtpAttempts,
-      verifiedAt: user.resetOtpVerifiedAt ?? null
-    };
+  hash: user.resetOtpHash ?? null,
+  expiresAt: user.resetOtpExpiresAt ?? null,
+  attempts: user.resetOtpAttempts
+};
   }
 
   async recordFailedOtpAttempt(
@@ -127,25 +126,39 @@ export class AuthRepository {
     return user.resetOtpAttempts;
   }
 
-  async markResetOtpVerified(
-    email: string,
-    hash: string,
-    now: Date,
-    maxAttempts: number
-  ): Promise<boolean> {
-    const result = await this.users.updateOne(
-      {
-        email,
-        resetOtpHash: hash,
-        resetOtpExpiresAt: { $gt: now },
-        resetOtpAttempts: { $lt: maxAttempts },
-        resetOtpVerifiedAt: { $exists: false }
+ async issuePasswordResetToken(
+  email: string,
+  otpHash: string,
+  resetTokenHash: string,
+  resetTokenExpiresAt: Date,
+  now: Date,
+  maxAttempts: number
+): Promise<boolean> {
+  const result = await this.users.updateOne(
+    {
+      email,
+      resetOtpHash: otpHash,
+      resetOtpExpiresAt: { $gt: now },
+      resetOtpAttempts: { $lt: maxAttempts }
+    
+    },
+    {
+      $set: {
+        resetTokenHash,
+        resetTokenExpiresAt
       },
-      { $set: { resetOtpVerifiedAt: now } }
-    );
+      $unset: {
+        resetOtpHash: 1,
+        resetOtpExpiresAt: 1,
+        resetOtpSentAt: 1
+        
+      }
+      
+    }
+  );
 
-    return result.modifiedCount === 1;
-  }
+  return result.modifiedCount === 1;
+}
 
   async clearResetOtp(email: string, hash?: string): Promise<void> {
     await this.users.updateOne(
@@ -158,36 +171,41 @@ export class AuthRepository {
           resetOtpHash: 1,
           resetOtpExpiresAt: 1,
           resetOtpSentAt: 1,
-          resetOtpVerifiedAt: 1
+        resetOtpAttempts: 1
+
+          
         },
         $set: { resetOtpAttempts: 0 }
       }
     );
   }
 
-  async resetPasswordWithOtp(
-    email: string,
-    passwordHash: string,
-    now: Date
-  ): Promise<boolean> {
-    const result = await this.users.updateOne(
-      {
-        email,
-        resetOtpVerifiedAt: { $exists: true },
-        resetOtpExpiresAt: { $gt: now }
-      },
-       {
-        $set: { password: passwordHash },
-        $inc: { tokenVersion: 1 },
-        $unset: {
-          resetOtpHash: 1,
-          resetOtpExpiresAt: 1,
-          resetOtpSentAt: 1,
-          resetOtpVerifiedAt: 1
-        }
+  async resetPasswordWithToken(
+  email: string,
+  resetTokenHash: string,
+  passwordHash: string,
+  now: Date
+): Promise<boolean> {
+  const result = await this.users.updateOne(
+    {
+      email,
+      resetTokenHash,
+      resetTokenExpiresAt: { $gt: now }
+    },
+    {
+      $set: { password: passwordHash },
+      $inc: { tokenVersion: 1 },
+      $unset: {
+        resetTokenHash: 1,
+        resetTokenExpiresAt: 1,
+        resetOtpHash: 1,
+        resetOtpExpiresAt: 1,
+        resetOtpSentAt: 1,
+        resetOtpAttempts: 1
       }
-    );
+    }
+  );
 
-    return result.modifiedCount === 1;
-  }
+  return result.modifiedCount === 1;
+}
 }
