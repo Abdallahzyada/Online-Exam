@@ -16,6 +16,10 @@ import { createCatalogRouter } from './modules/catalog/catalog.routes.js';
 import { createAttemptModule } from './modules/attempt/attempt.module.js';
 import type { AttemptModule } from './modules/attempt/attempt.module.js';
 import { createApp } from './app.js';
+import { createQuestionModel } from './modules/question/question.model.js';
+import { createQuestionRouter } from './modules/question/question.routes.js';
+import { MongooseQuestionRepository } from './modules/question/question.repository.js';
+import { createAttemptExportSource } from './modules/question/question.attempt-adapter.js';
 
 async function main(): Promise<void> {
   const env = parseEnvironment(process.env);
@@ -32,6 +36,7 @@ async function main(): Promise<void> {
     const database = connection;
     await ensureDashboardIndexes(database, env.ATTEMPT_COLLECTION);
     const readers = createMongoReaders(database, { users: env.USER_COLLECTION, quizzes: env.QUIZ_COLLECTION });
+    const questionModel = createQuestionModel(database);
     const auth = createAuth(new JwtVerifier(env.JWT_SECRET), readers.sessions);
     attempts = createAttemptModule({
       connection: database, auth, report,
@@ -46,7 +51,15 @@ async function main(): Promise<void> {
     monitor.start();
     const app = createApp({
       auth, trustProxy: env.TRUST_PROXY, reportError: report, corsOrigins: env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean),
-      moduleRouters: [createCatalogRouter(auth), attempts.router],
+      moduleRouters: [
+        createCatalogRouter(auth),
+        createQuestionRouter(
+          new MongooseQuestionRepository({ connection: database, questions: questionModel, quizCollection: env.QUIZ_COLLECTION }),
+          auth,
+          createAttemptExportSource(database)
+        ),
+        attempts.router
+      ],
       dashboard: {
         profiles: readers.profiles, quizzes: readers.quizzes, errors,
         repository: new MongooseDashboardRepository({ connection: database, attemptCollection: env.ATTEMPT_COLLECTION, errors }),

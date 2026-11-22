@@ -74,18 +74,16 @@ a question the Question Bank accepts can always be started:
 | Option ID | 1 to 64 characters |
 | Points | positive integer |
 
-Note for the Question Bank owner: its Mongoose model still stores at most 5,000
-characters and 50 options, while its DTO accepts 10,000 and 100. Either value
-works with Attempts; the Question Bank should pick one for its own DTO and model.
+These match the Question Bank DTO and model on `main` (10,000 characters, 100 options).
 
 ## Server integration
 
 - `src/common/errors/public-error.ts` lists `ATTEMPT_EXPIRED`,
   `ATTEMPT_ALREADY_SUBMITTED`, and `ATTEMPT_NOT_SUBMITTED`.
 - `src/server.ts` creates the module after auth, ensures the expiry index, adds
-  `attempts.router` to the single `moduleRouters` array next to Catalog, starts
-  the expiry job after the server listens, and stops it before MongoDB closes.
-  The Question Bank router should be added to that same array.
+  `attempts.router` to the single `moduleRouters` array with the Catalog and
+  Question Bank routers, starts the expiry job after the server listens, and
+  stops it before MongoDB closes (also when startup fails).
 - The model is registered as `QuizAttempt`, which the Question Bank attempt export adapter uses.
 
 ## Verification
@@ -95,4 +93,5 @@ works with Attempts; the Question Bank should pick one for its own DTO and model
 `ATTEMPT_TEST_MONGO_URI` (default `mongodb://127.0.0.1:27017`) and is skipped
 when no server is reachable. `npm run check:integration` also starts the real
 server and checks starting, submitting (including parallel submits and the grace
-window), reviewing, public error codes, archived quizzes, and Dashboard history.
+window), reviewing, public error codes, archived quizzes, Dashboard history, and
+the Question Bank attempt export.

@@ -171,10 +171,12 @@ try {
     { _id: attemptQuiz, title: 'Attempt Quiz', imageUrl: 'https://example.com/a.png', durationMinutes: 15, passingScorePercentage: 50, isPublished: true, isArchived: false },
     { _id: archivedQuiz, title: 'Archived Quiz', imageUrl: 'https://example.com/b.png', durationMinutes: 15, isPublished: true, isArchived: true }
   ]);
+  // Same shape the Question Bank model writes, including timestamps and revision.
+  const questionMeta = { createdAt: new Date(), updatedAt: new Date(), revision: 0 };
   await connection.collection('questions').insertMany([
-    { _id: qa, quizId: attemptQuiz, type: 'single', text: 'x'.repeat(10_000), points: 1, correctOptionIds: ['o0'],
+    { _id: qa, quizId: attemptQuiz, ...questionMeta, type: 'single', text: 'x'.repeat(10_000), points: 1, correctOptionIds: ['o0'],
       options: Array.from({ length: 100 }, (_, index) => ({ optionId: 'o' + index, text: 'Option ' + index })) },
-    { _id: qb, quizId: attemptQuiz, type: 'multi', text: 'Pick A and C', points: 1, correctOptionIds: ['a', 'c'],
+    { _id: qb, quizId: attemptQuiz, ...questionMeta, type: 'multi', text: 'Pick A and C', points: 1, correctOptionIds: ['a', 'c'],
       options: [{ optionId: 'a', text: 'A' }, { optionId: 'b', text: 'B' }, { optionId: 'c', text: 'C' }] }
   ]);
   const send = async (method, path, token, body) => {
@@ -231,6 +233,17 @@ try {
   checked('Dashboard history reads attempts created through the Attempts API', () => {
     assert.equal(attemptHistory.status, 200);
     assert.deepEqual(attemptHistory.body.data.map(entry => entry.passed).sort(), [false, true]);
+  });
+  const questionList = await http('/admin/quizzes/' + attemptQuiz + '/questions', adminToken);
+  const attemptExport = await fetch(base + '/admin/quizzes/' + attemptQuiz + '/attempts/export?format=ndjson', {
+    headers: { Authorization: 'Bearer ' + adminToken }, signal: AbortSignal.timeout(35_000)
+  });
+  const exportedLines = (await attemptExport.text()).split('\n').filter(Boolean);
+  checked('Question Bank router and its attempt export work alongside the Attempt router', () => {
+    assert.equal(questionList.status, 200);
+    assert.equal(attemptExport.status, 200);
+    assert.equal(exportedLines.length, 2);
+    assert.ok(exportedLines.some(line => line.includes(startedAttempt.body.data.attemptId)));
   });
   const attemptIndexes = await attempts.listIndexes().toArray();
   checked('Attempt expiry index is provisioned at startup', () => assert.ok(attemptIndexes.some(index => index.name === 'attempt_expiry_sweep')));
