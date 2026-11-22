@@ -144,6 +144,29 @@ npm run setup:env
 
 5. Start the local database and the server:
 
+First, clear any database connection set in this terminal. This lets the app use
+the connection saved in `.env`.
+
+PowerShell:
+
+```powershell
+Remove-Item Env:MONGO_URI -ErrorAction SilentlyContinue
+```
+
+Windows Command Prompt:
+
+```bat
+set MONGO_URI=
+```
+
+macOS or Linux:
+
+```sh
+unset MONGO_URI
+```
+
+Then run:
+
 ```text
 npm run db:local -- --write-env
 npm run dev
@@ -153,13 +176,19 @@ npm run dev
 
 Check these values:
 
-```text
-status: "ok"
-dbStatus: "connected"
-workerStatus: "ready"
+```json
+{
+  "success": true,
+  "data": {
+    "status": "ok",
+    "dbStatus": "connected",
+    "workerStatus": "ready"
+  }
+}
 ```
 
-If they match, the server is ready.
+The response also includes uptime and event-loop measurements.
+If these three values match, the server is ready.
 
 ### After restarting your computer
 
