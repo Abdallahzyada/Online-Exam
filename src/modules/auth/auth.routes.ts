@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import type { Request, RequestHandler } from 'express';
 import type { Connection } from 'mongoose';
 
@@ -34,10 +35,34 @@ export interface AuthRouterDependencies {
   reportError: (error: unknown) => void;
 }
 
+function createAuthRateLimit(limit: number) {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).json({
+        success: false,
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'Too many requests. Try again later.',
+          details: []
+        }
+      });
+    }
+  });
+}
+
 export function createAuthRouter(
   dependencies: AuthRouterDependencies
 ): Router {
   const router = Router();
+
+  const loginRateLimit = createAuthRateLimit(5);
+const forgotPasswordRateLimit = createAuthRateLimit(3);
+const verifyResetCodeRateLimit = createAuthRateLimit(5);
+const resetPasswordRateLimit = createAuthRateLimit(5);
 
   const repository = new AuthRepository(
     dependencies.connection,
@@ -64,11 +89,12 @@ export function createAuthRouter(
     controller.register
   );
 
-  router.post(
-    '/auth/login',
-    validateRequest(loginSchema, 'body', 'loginBody'),
-    controller.login
-  );
+router.post(
+  '/auth/login',
+  loginRateLimit,
+  validateRequest(loginSchema, 'body', 'loginBody'),
+  controller.login
+);
 
   router.post(
     '/auth/logout',
@@ -76,23 +102,26 @@ export function createAuthRouter(
     controller.logout
   );
 
-  router.post(
-    '/auth/forgot-password',
-    validateRequest(forgotPasswordSchema, 'body', 'forgotPasswordBody'),
-    controller.forgotPassword
-  );
+ router.post(
+  '/auth/forgot-password',
+  forgotPasswordRateLimit,
+  validateRequest(forgotPasswordSchema, 'body', 'forgotPasswordBody'),
+  controller.forgotPassword
+);
 
   router.post(
-    '/auth/verify-reset-code',
-    validateRequest(verifyResetCodeSchema, 'body', 'verifyResetCodeBody'),
-    controller.verifyResetCode
-  );
+  '/auth/verify-reset-code',
+  verifyResetCodeRateLimit,
+  validateRequest(verifyResetCodeSchema, 'body', 'verifyResetCodeBody'),
+  controller.verifyResetCode
+);
 
   router.post(
-    '/auth/reset-password',
-    validateRequest(resetPasswordSchema, 'body', 'resetPasswordBody'),
-    controller.resetPassword
-  );
+  '/auth/reset-password',
+  resetPasswordRateLimit,
+  validateRequest(resetPasswordSchema, 'body', 'resetPasswordBody'),
+  controller.resetPassword
+);
 
   router.get(
     '/auth/me',

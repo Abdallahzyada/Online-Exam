@@ -160,25 +160,24 @@ export class AuthRepository {
   return result.modifiedCount === 1;
 }
 
-  async clearResetOtp(email: string, hash?: string): Promise<void> {
-    await this.users.updateOne(
-      {
-        email,
-        ...(hash ? { resetOtpHash: hash } : {})
+ async clearResetOtp(email: string, hash?: string): Promise<void> {
+  await this.users.updateOne(
+    {
+      email,
+      ...(hash ? { resetOtpHash: hash } : {})
+    },
+    {
+      $unset: {
+        resetOtpHash: 1,
+        resetOtpExpiresAt: 1,
+        resetOtpSentAt: 1
       },
-      {
-        $unset: {
-          resetOtpHash: 1,
-          resetOtpExpiresAt: 1,
-          resetOtpSentAt: 1,
-        resetOtpAttempts: 1
-
-          
-        },
-        $set: { resetOtpAttempts: 0 }
+      $set: {
+        resetOtpAttempts: 0
       }
-    );
-  }
+    }
+  );
+}
 
   async resetPasswordWithToken(
   email: string,
